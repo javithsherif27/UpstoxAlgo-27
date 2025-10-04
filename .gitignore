@@ -1,0 +1,10 @@
+__pycache__/
+.python-version
+.env
+.cache
+node_modules/
+dist/
+.aws-sam/
+.idea/
+.vscode/
+coverage/

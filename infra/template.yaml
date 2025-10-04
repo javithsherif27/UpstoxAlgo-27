@@ -1,0 +1,87 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: Algo Trading App - SAM Template
+
+Globals:
+  Function:
+    Timeout: 30
+    Runtime: python3.13
+    MemorySize: 256
+    Environment:
+      Variables:
+        UPSTOX_BASE_URL: https://api.upstox.com/v2
+        TZ: Asia/Kolkata
+        INSTRUMENTS_TABLE: !Ref InstrumentsTable
+        ALLOWED_ORIGIN: !Ref AllowedOrigin
+  Api:
+    Cors:
+      AllowOrigin: !Ref AllowedOrigin
+      AllowHeaders: "*"
+      AllowMethods: "*"
+      AllowCredentials: true
+
+Parameters:
+  AllowedOrigin:
+    Type: String
+    Default: "http://localhost:5173"
+  AppJwtSecret:
+    Type: String
+    NoEcho: true
+
+Resources:
+  BackendFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: ../backend
+      Handler: app.handler
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref InstrumentsTable
+      Environment:
+        Variables:
+          APP_JWT_SECRET: !Ref AppJwtSecret
+      Events:
+        ApiEvent:
+          Type: Api
+          Properties:
+            Path: /{proxy+}
+            Method: ANY
+  InstrumentsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: pk
+          AttributeType: S
+      KeySchema:
+        - AttributeName: pk
+          KeyType: HASH
+      TableName: InstrumentsCache
+  FrontendBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      WebsiteConfiguration:
+        IndexDocument: index.html
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: false
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: false
+      BucketName: !Sub "algo-trading-frontend-${AWS::AccountId}-${AWS::Region}"
+  BucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref FrontendBucket
+      PolicyDocument:
+        Statement:
+          - Sid: AllowCloudFrontOAI
+            Effect: Allow
+            Principal: "*"
+            Action: s3:GetObject
+            Resource: !Sub "${FrontendBucket.Arn}/*"
+
+Outputs:
+  ApiUrl:
+    Value: !Sub "https://${ServerlessRestApi}.execute-api.${AWS::Region}.amazonaws.com/Prod"
+  FrontendBucketName:
+    Value: !Ref FrontendBucket

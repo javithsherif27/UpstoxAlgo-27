@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Upstox Instruments Test</title>
+    <script>
+        const CLIENT_ID = '43CM64';
+        const ACCESS_TOKEN = 'eyJ0eXAiOiJKV1QiLCJrZXlfaWQiOiJza192MS4wIiwiYWxnIjoiSFMyNTYifQ.eyJzdWIiOiI0M0NNNjQiLCJqdGkiOiI2OGRmNWVmY2FiNDdiNDQ4YjkwYTJjNGIiLCJpc011bHRpQ2xpZW50IjpmYWxzZSwiaXNQbHVzUGxhbiI6dHJ1ZSwiaWF0IjoxNzU5NDY5MzA4LCJpc3MiOiJ1ZGFwaS1nYXRld2F5LXNlcnZpY2UiLCJleHAiOjE3NTk1Mjg4MDB9.xAUA65z0nxrB6-BxEDnT1xvgm37z-rmakPFcXI1L0mI';
+
+        async function login() {
+            try {
+                const response = await fetch('http://localhost:8000/api/session/login', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        user_id: CLIENT_ID
+                    }),
+                    credentials: 'include'
+                });
+                
+                const data = await response.json();
+                document.getElementById('loginResult').textContent = 'Login: ' + JSON.stringify(data);
+                
+                if (data.status === 'ok') {
+                    await testProfile();
+                    await testInstruments();
+                }
+            } catch (error) {
+                document.getElementById('loginResult').textContent = 'Login Error: ' + error.message;
+            }
+        }
+
+        async function testProfile() {
+            try {
+                const response = await fetch('http://localhost:8000/api/upstox/profile', {
+                    headers: {
+                        'X-Upstox-Access-Token': ACCESS_TOKEN
+                    },
+                    credentials: 'include'
+                });
+                
+                const data = await response.json();
+                document.getElementById('profileResult').textContent = 'Profile: ' + JSON.stringify(data, null, 2);
+            } catch (error) {
+                document.getElementById('profileResult').textContent = 'Profile Error: ' + error.message;
+            }
+        }
+
+        async function testInstruments() {
+            try {
+                // First refresh the cache
+                const refreshResponse = await fetch('http://localhost:8000/api/instruments/refresh', {
+                    method: 'POST',
+                    headers: {
+                        'X-Upstox-Access-Token': ACCESS_TOKEN
+                    },
+                    credentials: 'include'
+                });
+                
+                const refreshData = await refreshResponse.json();
+                document.getElementById('refreshResult').textContent = 'Cache Refresh: ' + JSON.stringify(refreshData, null, 2);
+                
+                // Then get instruments
+                const instrumentsResponse = await fetch('http://localhost:8000/api/instruments?limit=5', {
+                    headers: {
+                        'X-Upstox-Access-Token': ACCESS_TOKEN
+                    },
+                    credentials: 'include'
+                });
+                
+                const instrumentsData = await instrumentsResponse.json();
+                document.getElementById('instrumentsResult').textContent = 'Instruments (first 5): ' + JSON.stringify(instrumentsData, null, 2);
+            } catch (error) {
+                document.getElementById('instrumentsResult').textContent = 'Instruments Error: ' + error.message;
+            }
+        }
+    </script>
+</head>
+<body>
+    <h1>Upstox API Test</h1>
+    <button onclick="login()">Test Login & APIs</button>
+    
+    <h2>Results:</h2>
+    <div>
+        <h3>Login:</h3>
+        <pre id="loginResult">Click button to test...</pre>
+    </div>
+    
+    <div>
+        <h3>Profile:</h3>
+        <pre id="profileResult">Will populate after login...</pre>
+    </div>
+    
+    <div>
+        <h3>Cache Refresh:</h3>
+        <pre id="refreshResult">Will populate after login...</pre>
+    </div>
+    
+    <div>
+        <h3>Instruments:</h3>
+        <pre id="instrumentsResult">Will populate after refresh...</pre>
+    </div>
+</body>
+</html>
