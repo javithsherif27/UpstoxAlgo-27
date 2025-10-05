@@ -28,6 +28,12 @@ class UpstoxWebSocketClient:
         self._tick_callback: Optional[Callable] = None
         self._connection_task: Optional[asyncio.Task] = None
         self._running = False
+        self._on_connected = None
+        self._on_disconnected = None
+
+    def set_connection_callbacks(self, on_connected, on_disconnected):
+        self._on_connected = on_connected
+        self._on_disconnected = on_disconnected
     
     async def get_websocket_url(self, access_token: str) -> str:
         """Get WebSocket URL from Upstox API"""
@@ -104,6 +110,11 @@ class UpstoxWebSocketClient:
                     self.is_connected = True
                     self.connection_time = datetime.now(timezone.utc)
                     logger.info("WebSocket connected successfully")
+                    if self._on_connected:
+                        try:
+                            await self._on_connected()
+                        except Exception as _e:
+                            logger.error(f"on_connected hook error: {_e}")
                     
                     # Listen for messages
                     async for message in websocket:
@@ -119,6 +130,11 @@ class UpstoxWebSocketClient:
                 logger.warning("WebSocket connection closed")
                 self.is_connected = False
                 self.ws_connection = None
+                if self._on_disconnected:
+                    try:
+                        await self._on_disconnected()
+                    except Exception as _e:
+                        logger.error(f"on_disconnected hook error: {_e}")
                 
                 if self._running:
                     logger.info("Attempting to reconnect in 5 seconds...")
@@ -129,6 +145,11 @@ class UpstoxWebSocketClient:
                 self.errors.append(str(e))
                 self.is_connected = False
                 self.ws_connection = None
+                if self._on_disconnected:
+                    try:
+                        await self._on_disconnected()
+                    except Exception as _e:
+                        logger.error(f"on_disconnected hook error: {_e}")
                 
                 if self._running:
                     await asyncio.sleep(5)

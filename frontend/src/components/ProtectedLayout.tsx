@@ -52,6 +52,7 @@ export const ProtectedLayout: React.FC = () => {
           <NavLink to="/app/dashboard" className={({isActive})=>`block px-3 py-2 rounded text-sm ${isActive?'bg-gray-700':'hover:bg-gray-800'}`}>Dashboard</NavLink>
           <NavLink to="/app/instruments" className={({isActive})=>`block px-3 py-2 rounded text-sm ${isActive?'bg-gray-700':'hover:bg-gray-800'}`}>Instruments</NavLink>
           <NavLink to="/app/market-data" className={({isActive})=>`block px-3 py-2 rounded text-sm ${isActive?'bg-gray-700':'hover:bg-gray-800'}`}>Market Data</NavLink>
+          <NavLink to="/app/portfolio" className={({isActive})=>`block px-3 py-2 rounded text-sm ${isActive?'bg-gray-700':'hover:bg-gray-800'}`}>Portfolio</NavLink>
           <NavLink to="/app/strategies" className={({isActive})=>`block px-3 py-2 rounded text-sm ${isActive?'bg-gray-700':'hover:bg-gray-800'}`}>Strategies</NavLink>
         </nav>
         <button onClick={logout} className="m-2 rounded bg-red-600 hover:bg-red-700 text-sm py-2">Logout</button>

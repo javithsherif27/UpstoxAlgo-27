@@ -2,6 +2,8 @@ from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from mangum import Mangum
 from .routers import session, upstox, instruments, market_data
+from .routers import market as stream_market
+from .routers import portfolio as portfolio_router
 from .utils.logging import configure_logging, get_logger
 import os
 
@@ -10,14 +12,23 @@ logger = get_logger(__name__)
 
 app = FastAPI(title="Algo Trading App API")
 
-ALLOWED_ORIGIN = os.getenv("ALLOWED_ORIGIN", "http://localhost:5173")
+# More permissive CORS for development
+ALLOWED_ORIGINS = [
+    "http://localhost:5173",
+    "http://localhost:5174",
+    "http://127.0.0.1:5173", 
+    "http://127.0.0.1:5174",
+    "http://localhost:3000",
+    "http://127.0.0.1:3000"
+]
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[ALLOWED_ORIGIN],
+    allow_origins=ALLOWED_ORIGINS,
     allow_credentials=True,
-    allow_methods=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allow_headers=["*"],
+    expose_headers=["*"],
 )
 
 @app.middleware("http")
@@ -33,5 +44,7 @@ app.include_router(session.router, prefix="/api/session", tags=["session"])
 app.include_router(upstox.router, prefix="/api/upstox", tags=["upstox"])
 app.include_router(instruments.router, prefix="/api", tags=["instruments"])
 app.include_router(market_data.router, prefix="/api", tags=["market-data"])
+app.include_router(stream_market.router, tags=["stream"])
+app.include_router(portfolio_router.router, tags=["portfolio"])
 
 handler = Mangum(app)

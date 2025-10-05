@@ -1,0 +1,8 @@
+# Start backend
+D:\source-code\UpstoxAlgo-27\start-backend.bat
+
+# Start frontend  
+D:\source-code\UpstoxAlgo-27\start-frontend.bat
+
+# Start both
+D:\source-code\UpstoxAlgo-27\start-all.bat

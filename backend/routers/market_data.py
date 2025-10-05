@@ -197,15 +197,19 @@ async def get_live_prices(
         
         prices = {}
         for instrument in selected_instruments:
-            # Get latest 1-minute candle as current price
-            latest_candles = await market_data_service.get_candles(
-                instrument_key=instrument.instrument_key,
-                interval=CandleInterval.ONE_MINUTE,
-                limit=1
-            )
-            
-            if latest_candles:
-                candle = latest_candles[0]
+            # Prefer latest 1-minute candle, else 5m, else 15m
+            candle = None
+            for interval in (CandleInterval.ONE_MINUTE, CandleInterval.FIVE_MINUTE, CandleInterval.FIFTEEN_MINUTE):
+                latest = await market_data_service.get_candles(
+                    instrument_key=instrument.instrument_key,
+                    interval=interval,
+                    limit=1
+                )
+                if latest:
+                    candle = latest[0]
+                    break
+
+            if candle:
                 prices[instrument.instrument_key] = {
                     "symbol": instrument.symbol,
                     "ltp": candle.close_price,

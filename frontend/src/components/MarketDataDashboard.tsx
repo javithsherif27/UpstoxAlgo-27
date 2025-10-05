@@ -6,6 +6,7 @@ import {
   useLivePrices,
   useCandlesForSelectedInstruments
 } from '../queries/useMarketData';
+import { TVChart } from './TVChart';
 
 export const MarketDataDashboard: React.FC = () => {
   const [selectedInterval, setSelectedInterval] = useState('1m');
@@ -13,6 +14,13 @@ export const MarketDataDashboard: React.FC = () => {
   const { data: collectionStatus, isLoading: statusLoading } = useMarketDataCollectionStatus();
   const { data: livePrices, isLoading: pricesLoading } = useLivePrices();
   const { data: candlesData } = useCandlesForSelectedInstruments(selectedInterval, 5);
+  const firstInstrument = React.useMemo(() => {
+    if (!livePrices?.prices) return undefined;
+    const entries = Object.entries(livePrices.prices);
+    if (entries.length === 0) return undefined;
+    const [instrumentKey, price] = entries[0] as any;
+    return { instrumentKey, symbol: price.symbol } as { instrumentKey: string; symbol: string };
+  }, [livePrices]);
   
   const startCollectionMutation = useStartMarketDataCollection();
   const stopCollectionMutation = useStopMarketDataCollection();
@@ -170,6 +178,18 @@ export const MarketDataDashboard: React.FC = () => {
       </div>
 
       {/* Candle Data */}
+      {firstInstrument && (
+        <div className="bg-white rounded-lg border">
+          <div className="px-4 py-3 border-b flex justify-between items-center">
+            <h3 className="text-lg font-medium">Chart - {firstInstrument.symbol}</h3>
+          </div>
+          <div className="p-2">
+            <div style={{ height: 480 }}>
+              <TVChart symbol={firstInstrument.symbol} instrumentKey={firstInstrument.instrumentKey} height={480} />
+            </div>
+          </div>
+        </div>
+      )}
       <div className="bg-white rounded-lg border">
         <div className="px-4 py-3 border-b flex justify-between items-center">
           <h3 className="text-lg font-medium">Recent Candles</h3>

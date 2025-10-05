@@ -9,6 +9,7 @@ from ..services.market_data_storage import market_data_storage
 from ..services.websocket_client import upstox_ws_client
 from ..services.instrument_service import instrument_service
 from ..utils.logging import get_logger
+from ..services.backfill_client import fetch_intraday, fetch_historical
 
 logger = get_logger(__name__)
 
@@ -152,14 +153,17 @@ class MarketDataService:
                 logger.warning("Data collection already started")
                 return True
             
-            # Connect WebSocket
-            await upstox_ws_client.connect(access_token)
-            
             # Get selected instruments
             selected_instruments = await instrument_service.get_selected_instruments()
             
             if not selected_instruments:
                 raise Exception("No instruments selected for data collection")
+            
+            # Bootstrap recent history (last 1 day) into SQLite so UI has LTP off-market
+            await self._backfill_recent_history(selected_instruments, access_token)
+
+            # Connect WebSocket (after backfill to avoid immediate write contention)
+            await upstox_ws_client.connect(access_token)
             
             # Subscribe to selected instruments
             instrument_keys = [inst.instrument_key for inst in selected_instruments]
@@ -208,6 +212,61 @@ class MarketDataService:
             
         except Exception as e:
             logger.error(f"Error closing active candles: {e}")
+
+    async def _backfill_recent_history(self, selected_instruments, access_token: str):
+        """Backfill last 1 day of 1m/5m/15m candles for selected instruments into SQLite."""
+        try:
+            now = datetime.now(timezone.utc)
+            since = now - timedelta(days=1)
+            intervals = [
+                CandleInterval.ONE_MINUTE,
+                CandleInterval.FIVE_MINUTE,
+                CandleInterval.FIFTEEN_MINUTE,
+            ]
+
+            async def backfill_one(inst, interval: CandleInterval):
+                symbol = inst.symbol
+                try:
+                    # Prefer intraday for recent ranges
+                    candles = await fetch_intraday(symbol, interval.value, since, now, access_token)
+                except Exception as e:
+                    logger.warning(f"Intraday backfill failed for {symbol} {interval.value}: {e}; trying historical")
+                    candles = []
+                    try:
+                        candles = await fetch_historical(symbol, interval.value, since, now, access_token)
+                    except Exception as e2:
+                        logger.error(f"Historical backfill failed for {symbol} {interval.value}: {e2}")
+                        return
+
+                # Store into SQLite as CandleDataDTO
+                for c in candles:
+                    dto = CandleDataDTO(
+                        instrument_key=inst.instrument_key,
+                        symbol=inst.symbol,
+                        interval=interval,
+                        timestamp=c.start,
+                        open_price=c.o,
+                        high_price=c.h,
+                        low_price=c.l,
+                        close_price=c.c,
+                        volume=c.v,
+                        tick_count=0,
+                    )
+                    await market_data_storage.store_candle(dto)
+
+            tasks: List = []
+            for inst in selected_instruments:
+                for itv in intervals:
+                    tasks.append(backfill_one(inst, itv))
+            # Run with limited concurrency to avoid overloading
+            # Chunk tasks in small batches
+            batch_size = 10
+            for i in range(0, len(tasks), batch_size):
+                await asyncio.gather(*tasks[i:i+batch_size])
+
+            logger.info("Backfill complete for selected instruments (last 1 day)")
+        except Exception as e:
+            logger.error(f"Backfill error: {e}")
     
     async def add_instruments_to_collection(self, instrument_keys: List[str]):
         """Add instruments to active data collection"""
