@@ -1,0 +1,46 @@
+services:
+  localstack:
+    container_name: localstack-upstox
+    image: localstack/localstack:latest
+    ports:
+      - "4566:4566"            # LocalStack Gateway
+      - "4510-4559:4510-4559"  # External services port range
+    environment:
+      - DEBUG=${DEBUG:-0}
+      - DOCKER_HOST=unix:///var/run/docker.sock
+      - PERSISTENCE=${PERSISTENCE:-0}
+      # Services to start
+      - SERVICES=dynamodb,s3
+      # DynamoDB specific
+      - DYNAMODB_ERROR_PROBABILITY=0
+      - DYNAMODB_HEAP_SIZE=256m
+      # S3 specific
+      - S3_SKIP_SIGNATURE_VALIDATION=1
+      # Initialization
+      - INIT_SCRIPTS_PATH=/etc/localstack/init/ready.d
+    volumes:
+      - "${LOCALSTACK_VOLUME_DIR:-./volume}:/var/lib/localstack"
+      - "/var/run/docker.sock:/var/run/docker.sock"
+      - "./localstack-init:/etc/localstack/init/ready.d"
+    networks:
+      - localstack-net
+
+  # DynamoDB Admin UI (optional but helpful for debugging)
+  dynamodb-admin:
+    container_name: dynamodb-admin-upstox
+    image: aaronshaf/dynamodb-admin
+    ports:
+      - "8001:8001"
+    environment:
+      - DYNAMO_ENDPOINT=http://localstack:4566
+      - AWS_REGION=us-east-1
+      - AWS_ACCESS_KEY_ID=test
+      - AWS_SECRET_ACCESS_KEY=test
+    networks:
+      - localstack-net
+    depends_on:
+      - localstack
+
+networks:
+  localstack-net:
+    driver: bridge

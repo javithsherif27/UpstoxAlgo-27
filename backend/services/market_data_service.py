@@ -128,13 +128,35 @@ class MarketDataService:
     def __init__(self):
         self.candle_manager = CandleManager()
         self.is_collecting = False
+        self.total_ticks_received = 0
+        self.errors: List[str] = []
+        self.connection_status = "disconnected"
         
         # Set up tick processing callback
         upstox_ws_client.set_tick_callback(self.process_tick)
+        
+        # Set up connection status callbacks
+        upstox_ws_client.set_connection_callbacks(
+            on_connected=self._on_ws_connected,
+            on_disconnected=self._on_ws_disconnected
+        )
+        
+    async def _on_ws_connected(self):
+        """Called when WebSocket connects successfully"""
+        logger.info("WebSocket connected successfully")
+        self.connection_status = "connected"
+        
+    async def _on_ws_disconnected(self):
+        """Called when WebSocket disconnects"""
+        logger.warning("WebSocket disconnected")
+        self.connection_status = "disconnected"
     
     async def process_tick(self, tick: MarketTickDTO):
         """Process incoming tick data"""
         try:
+            # Increment tick counter
+            self.total_ticks_received += 1
+            
             # Store raw tick
             await market_data_storage.store_tick(tick)
             
@@ -144,7 +166,12 @@ class MarketDataService:
             logger.debug(f"Processed tick for {tick.symbol}: LTP={tick.ltp}")
             
         except Exception as e:
-            logger.error(f"Error processing tick: {e}")
+            error_msg = f"Error processing tick: {e}"
+            logger.error(error_msg)
+            self.errors.append(error_msg)
+            # Keep only last 50 errors
+            if len(self.errors) > 50:
+                self.errors = self.errors[-50:]
     
     async def start_data_collection(self, access_token: str) -> bool:
         """Start WebSocket connection and data collection"""
@@ -160,23 +187,32 @@ class MarketDataService:
                 raise Exception("No instruments selected for data collection")
             
             # Bootstrap recent history (last 1 day) into SQLite so UI has LTP off-market
+            logger.info(f"Backfilling recent history for {len(selected_instruments)} instruments...")
             await self._backfill_recent_history(selected_instruments, access_token)
 
             # Connect WebSocket (after backfill to avoid immediate write contention)
+            logger.info("Connecting to Upstox WebSocket...")
             await upstox_ws_client.connect(access_token)
+            
+            # Wait for connection to establish
+            await asyncio.sleep(2)
             
             # Subscribe to selected instruments
             instrument_keys = [inst.instrument_key for inst in selected_instruments]
-            subscription_request = SubscriptionRequest(
-                instrument_keys=instrument_keys,
-                mode="ltpc"  # Start with LTPC mode for basic price data
-            )
             
-            await upstox_ws_client.subscribe(subscription_request)
-            
-            self.is_collecting = True
-            logger.info(f"Started data collection for {len(instrument_keys)} instruments")
-            return True
+            if upstox_ws_client.is_connected:
+                logger.info(f"Subscribing to {len(instrument_keys)} instruments...")
+                subscription_request = SubscriptionRequest(
+                    instrument_keys=instrument_keys,
+                    mode="ltpc"  # Start with LTPC mode for basic price data
+                )
+                
+                await upstox_ws_client.subscribe(subscription_request)
+                self.is_collecting = True
+                logger.info(f"✅ Started data collection for {len(instrument_keys)} instruments")
+                return True
+            else:
+                raise Exception("WebSocket connection failed - unable to subscribe to instruments")
             
         except Exception as e:
             logger.error(f"Error starting data collection: {e}")
@@ -324,6 +360,62 @@ class MarketDataService:
     def is_data_collection_active(self) -> bool:
         """Check if data collection is currently active"""
         return self.is_collecting and upstox_ws_client.is_connected
+    
+    async def get_latest_ticks(self, instrument_keys: List[str] = None) -> dict:
+        """Get latest tick data for specified instruments or all instruments"""
+        return await market_data_storage.get_latest_ticks(instrument_keys)
+    
+    async def store_candle_data(self, candle: CandleDataDTO):
+        """Store a single candle data record"""
+        return await market_data_storage.store_candle(candle)
+    
+    def get_status(self) -> Dict:
+        """Get current status of market data collection"""
+        try:
+            # Safely get WebSocket client status
+            ws_connected = getattr(upstox_ws_client, 'is_connected', False)
+            subscribed_count = len(getattr(upstox_ws_client, 'subscribed_instruments', {}))
+            
+            # Safely get connection time
+            connection_time = None
+            if hasattr(upstox_ws_client, 'connection_time') and upstox_ws_client.connection_time:
+                try:
+                    connection_time = upstox_ws_client.connection_time.isoformat()
+                except:
+                    connection_time = str(upstox_ws_client.connection_time)
+            
+            # Safely get heartbeat time
+            heartbeat_time = None
+            if hasattr(upstox_ws_client, 'last_heartbeat') and upstox_ws_client.last_heartbeat:
+                try:
+                    heartbeat_time = upstox_ws_client.last_heartbeat.isoformat()
+                except:
+                    heartbeat_time = str(upstox_ws_client.last_heartbeat)
+            
+            return {
+                "is_collecting": self.is_collecting,
+                "is_connected": ws_connected,  # Frontend expects this field
+                "total_ticks_received": self.total_ticks_received,
+                "subscribed_instruments_count": subscribed_count,
+                "connection_status": self.connection_status,
+                "last_heartbeat": heartbeat_time,
+                "errors": self.errors[-10:] if self.errors else [],  # Last 10 errors
+                "active_candles": sum(len(candles) for candles in self.candle_manager.active_candles.values()),
+                "message": "Ready to start data collection" if not self.is_collecting else "Data collection active"
+            }
+        except Exception as e:
+            logger.error(f"Error in get_status: {e}")
+            return {
+                "is_collecting": False,
+                "is_connected": False,
+                "total_ticks_received": 0,
+                "subscribed_instruments_count": 0,
+                "connection_status": "ready",
+                "last_heartbeat": None,
+                "errors": [],
+                "active_candles": 0,
+                "message": "Service ready - login to start data collection"
+            }
 
 # Global service instance
 market_data_service = MarketDataService()

@@ -1,8 +1,25 @@
-# Start backend
-D:\source-code\UpstoxAlgo-27\start-backend.bat
+# LocalStack Development Scripts (Updated - Fixed Path Issues)
 
-# Start frontend  
-D:\source-code\UpstoxAlgo-27\start-frontend.bat
+## Interactive Launcher (RECOMMENDED)
+.\dev-launcher.bat
 
-# Start both
-D:\source-code\UpstoxAlgo-27\start-all.bat
+## Full Stack Options
+.\start-local.bat           # LocalStack + Backend + Frontend
+.\start-local-dev.bat       # Alternative full stack  
+.\start-all.bat             # Traditional + LocalStack
+
+## Individual Services  
+.\start-localstack.bat      # LocalStack only
+.\start-backend.bat         # Backend only (auto-detects LocalStack)
+.\start-frontend.bat        # Frontend only
+
+## Stop Services
+.\stop-local.bat            # Stop everything
+.\stop-localstack.bat       # Stop LocalStack only
+
+## IMPORTANT NOTES:
+- Use .\ prefix in PowerShell: .\dev-launcher.bat
+- Docker Desktop must be running for LocalStack
+- Fixed: Path resolution in dev-launcher.bat
+- Fixed: Removed obsolete version from docker-compose.localstack.yml
+- python-dotenv installed successfully

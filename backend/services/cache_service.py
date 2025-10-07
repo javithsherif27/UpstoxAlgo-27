@@ -5,9 +5,9 @@ from ..utils.logging import get_logger
 
 logger = get_logger(__name__)
 
-# Lazy DynamoDB resource creation. If AWS region/credentials are not present
-# fall back to an in-memory cache to avoid crashing the app during local dev.
+# Lazy DynamoDB resource creation. Support LocalStack for local development.
 TABLE_NAME = os.getenv("INSTRUMENTS_TABLE", "InstrumentsCache")
+USE_LOCALSTACK = os.getenv("USE_LOCALSTACK", "false").lower() == "true"
 
 _table = None
 _local_cache: dict[str, Any] = {}
@@ -19,14 +19,32 @@ def _init_table():
     try:
         import boto3
 
-        region = os.getenv("AWS_REGION") or os.getenv("AWS_DEFAULT_REGION")
-        if region:
-            session = boto3.session.Session(region_name=region)
-            dynamodb = session.resource("dynamodb")
+        # Configure for LocalStack if enabled
+        if USE_LOCALSTACK:
+            logger.info("Using LocalStack for DynamoDB")
+            dynamodb = boto3.resource(
+                "dynamodb",
+                endpoint_url="http://localhost:4566",
+                region_name="us-east-1",
+                aws_access_key_id="test",
+                aws_secret_access_key="test"
+            )
         else:
-            # no region configured; attempt default resource which may still work if env is set later
-            dynamodb = boto3.resource("dynamodb")
+            # Production AWS configuration
+            region = os.getenv("AWS_REGION") or os.getenv("AWS_DEFAULT_REGION")
+            if region:
+                session = boto3.session.Session(region_name=region)
+                dynamodb = session.resource("dynamodb")
+            else:
+                # no region configured; attempt default resource which may still work if env is set later
+                dynamodb = boto3.resource("dynamodb")
+        
         _table = dynamodb.Table(TABLE_NAME)
+        
+        # Test table access
+        _table.load()
+        logger.info(f"Connected to DynamoDB table: {TABLE_NAME}")
+        
     except Exception as e:
         logger.warning("DynamoDB not available, using local in-memory cache: %s", e)
         _table = None

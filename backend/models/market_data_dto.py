@@ -7,6 +7,7 @@ class CandleInterval(str, Enum):
     ONE_MINUTE = "1m"
     FIVE_MINUTE = "5m"
     FIFTEEN_MINUTE = "15m"
+    ONE_DAY = "1d"
 
 class MarketTickDTO(BaseModel):
     """Raw tick data from WebSocket"""
@@ -55,3 +56,10 @@ class SubscriptionRequest(BaseModel):
     instrument_keys: List[str]
     mode: str = "ltpc"  # "ltpc", "full", "option_greeks", "full_d30"
     intervals: List[CandleInterval] = [CandleInterval.ONE_MINUTE, CandleInterval.FIVE_MINUTE, CandleInterval.FIFTEEN_MINUTE]
+
+class FetchHistoricalRequest(BaseModel):
+    """Request to fetch historical data from Upstox API"""
+    symbol: str
+    interval: str  # "1DAY", "1MINUTE", etc.
+    from_date: str  # "2024-12-01" 
+    to_date: str    # "2024-12-31"

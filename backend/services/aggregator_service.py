@@ -213,6 +213,18 @@ class AggregatorService:
     async def _on_ws_disconnected(self):
         # nothing required immediately; reconnect logic handled by client
         return
+    
+    def get_status(self) -> dict:
+        """Get current status of the aggregator service"""
+        return {
+            "is_streaming": self._streaming,
+            "symbols": list(self._symbols),
+            "symbol_count": len(self._symbols),
+            "ws_connected": upstox_ws_client.is_connected,
+            "total_candles": sum(len(candles) for candles in self.candles.values()),
+            "timeframes": TIMEFRAMES,
+            "last_tick_time": getattr(self, '_last_tick_time', None),
+        }
 
 
 aggregator_service = AggregatorService()

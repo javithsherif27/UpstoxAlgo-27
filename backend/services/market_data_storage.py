@@ -190,6 +190,85 @@ class MarketDataStorage:
         candles = await self.get_candles(instrument_key, interval, limit=1)
         return candles[0] if candles else None
     
+    async def get_latest_ticks(self, instrument_keys: List[str] = None) -> dict:
+        """Get the latest tick data for specified instruments or all instruments"""
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                
+                if instrument_keys:
+                    # Get latest tick for each specified instrument
+                    placeholders = ','.join(['?' for _ in instrument_keys])
+                    query = f"""
+                        SELECT DISTINCT t1.instrument_key, t1.symbol, t1.ltp, t1.ltt, t1.ltq, 
+                               t1.cp, t1.volume, t1.oi, t1.timestamp
+                        FROM market_ticks t1
+                        INNER JOIN (
+                            SELECT instrument_key, MAX(timestamp) as max_timestamp
+                            FROM market_ticks 
+                            WHERE instrument_key IN ({placeholders})
+                            GROUP BY instrument_key
+                        ) t2 ON t1.instrument_key = t2.instrument_key 
+                             AND t1.timestamp = t2.max_timestamp
+                    """
+                    cursor.execute(query, instrument_keys)
+                else:
+                    # Get latest tick for all instruments
+                    query = """
+                        SELECT DISTINCT t1.instrument_key, t1.symbol, t1.ltp, t1.ltt, t1.ltq, 
+                               t1.cp, t1.volume, t1.oi, t1.timestamp
+                        FROM market_ticks t1
+                        INNER JOIN (
+                            SELECT instrument_key, MAX(timestamp) as max_timestamp
+                            FROM market_ticks 
+                            GROUP BY instrument_key
+                        ) t2 ON t1.instrument_key = t2.instrument_key 
+                             AND t1.timestamp = t2.max_timestamp
+                    """
+                    cursor.execute(query)
+                
+                rows = cursor.fetchall()
+                
+                latest_ticks = {}
+                for row in rows:
+                    instrument_key, symbol, ltp, ltt, ltq, cp, volume, oi, timestamp = row
+                    
+                    # Calculate OHLC from recent ticks (last 1 minute)
+                    recent_timestamp = datetime.fromisoformat(timestamp) - timedelta(minutes=1)
+                    cursor.execute("""
+                        SELECT MIN(ltp) as low, MAX(ltp) as high, 
+                               (SELECT ltp FROM market_ticks WHERE instrument_key = ? 
+                                AND timestamp >= ? ORDER BY timestamp ASC LIMIT 1) as open
+                        FROM market_ticks 
+                        WHERE instrument_key = ? AND timestamp >= ?
+                    """, (instrument_key, recent_timestamp.isoformat(), 
+                          instrument_key, recent_timestamp.isoformat()))
+                    
+                    ohlc_row = cursor.fetchone()
+                    low, high, open_price = ohlc_row if ohlc_row else (ltp, ltp, ltp)
+                    
+                    # Use cp (close price) as open if no recent data, otherwise use calculated open
+                    if open_price is None:
+                        open_price = cp
+                    
+                    latest_ticks[instrument_key] = {
+                        "symbol": symbol,
+                        "ltp": ltp,
+                        "open": open_price,
+                        "high": high or ltp,
+                        "low": low or ltp,
+                        "volume": volume or 0,
+                        "timestamp": timestamp,
+                        "change": ltp - open_price if open_price else 0,
+                        "change_percent": ((ltp - open_price) / open_price * 100) if open_price and open_price > 0 else 0
+                    }
+                
+                return latest_ticks
+                
+        except Exception as e:
+            logger.error(f"Error getting latest ticks: {e}")
+            return {}
+    
     async def cleanup_old_data(self, days_to_keep: int = 30):
         """Clean up old tick data to manage database size"""
         try:

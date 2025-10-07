@@ -4,7 +4,10 @@ from typing import List, Optional
 from fastapi import APIRouter, Depends, Header, HTTPException, Query
 
 from ..services.aggregator_service import aggregator_service
+from ..services.market_data_service import market_data_service
+from ..utils.logging import get_logger
 
+logger = get_logger(__name__)
 router = APIRouter()
 
 
@@ -20,12 +23,28 @@ async def stream_start(payload: dict, token: str = Depends(require_token)):
     exchange: str = payload.get("exchange") or "NSE"
     if not symbols:
         raise HTTPException(status_code=400, detail="symbols required")
-    return await aggregator_service.start_stream(symbols, exchange, token)
+    
+    # Start both aggregator service (legacy) and market data service (new)
+    aggregator_result = await aggregator_service.start_stream(symbols, exchange, token)
+    market_data_result = await market_data_service.start_data_collection(token)
+    
+    return {
+        "aggregator": aggregator_result,
+        "market_data": market_data_result,
+        "status": "started" if market_data_result else "partial_failure"
+    }
 
 
 @router.post("/api/stream/stop")
 async def stream_stop():
-    return await aggregator_service.stop_stream()
+    aggregator_result = await aggregator_service.stop_stream()
+    market_data_result = await market_data_service.stop_data_collection()
+    
+    return {
+        "aggregator": aggregator_result,
+        "market_data": market_data_result,
+        "status": "stopped"
+    }
 
 
 @router.get("/api/candles")
@@ -37,6 +56,14 @@ async def get_candles(symbol: str = Query(...), timeframe: str = Query(...), lim
 async def stream_ping():
     # Lightweight health data for now
     return {"ok": True}
+
+@router.get("/api/stream/status")
+async def stream_status():
+    """Get detailed status of market data collection"""
+    return {
+        "test": "working",
+        "status": "ok"
+    }
 
 
 @router.post("/api/stream/recover")

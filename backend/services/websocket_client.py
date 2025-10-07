@@ -12,6 +12,13 @@ from ..models.market_data_dto import (
 )
 from ..utils.logging import get_logger
 
+# Import protobuf classes
+try:
+    from ..proto.MarketDataFeed_pb2 import FeedResponse, Feed, LTPC
+except ImportError:
+    logger = get_logger(__name__)
+    logger.warning("Protobuf classes not found. Market data decoding may not work properly.")
+
 logger = get_logger(__name__)
 
 class UpstoxWebSocketClient:
@@ -36,31 +43,46 @@ class UpstoxWebSocketClient:
         self._on_disconnected = on_disconnected
     
     async def get_websocket_url(self, access_token: str) -> str:
-        """Get WebSocket URL from Upstox API"""
+        """Get WebSocket URL from Upstox API v2"""
         try:
             headers = {
                 "Authorization": f"Bearer {access_token}",
-                "Accept": "*/*"
+                "Accept": "*/*",
+                "Content-Type": "application/json"
             }
             
-            async with httpx.AsyncClient() as client:
-                # The API redirects to WebSocket URL
+            async with httpx.AsyncClient(timeout=httpx.Timeout(30.0)) as client:
+                # Use the current v3 API endpoint for WebSocket URL (v2 was discontinued)
+                logger.info("Requesting WebSocket URL from Upstox API v3...")
                 response = await client.get(
                     "https://api.upstox.com/v3/feed/market-data-feed",
                     headers=headers,
                     follow_redirects=False
                 )
                 
-                if response.status_code == 302:
-                    # Extract WebSocket URL from redirect
+                logger.info(f"WebSocket URL response status: {response.status_code}")
+                
+                if response.status_code == 200:
+                    # API v3 returns JSON response with WebSocket URL
+                    data = response.json()
+                    if data.get("status") == "success" and "data" in data:
+                        ws_url = data["data"].get("authorizedRedirectUri")
+                        if ws_url and ws_url.startswith("wss://"):
+                            logger.info(f"Got WebSocket URL: {ws_url}")
+                            return ws_url
+                elif response.status_code == 302:
+                    # Fallback: Extract WebSocket URL from redirect
                     ws_url = response.headers.get("location")
                     if ws_url and ws_url.startswith("wss://"):
-                        logger.info(f"Got WebSocket URL: {ws_url}")
+                        logger.info(f"Got WebSocket URL from redirect: {ws_url}")
                         return ws_url
-                    
-                logger.error(f"Unexpected response: {response.status_code}")
+                
+                logger.error(f"Unexpected response: {response.status_code}, body: {response.text}")
                 raise Exception(f"Failed to get WebSocket URL: {response.status_code}")
                 
+        except httpx.HTTPStatusError as e:
+            logger.error(f"HTTP error getting WebSocket URL: {e.response.status_code} - {e.response.text}")
+            raise Exception(f"HTTP {e.response.status_code}: {e.response.text}")
         except Exception as e:
             logger.error(f"Error getting WebSocket URL: {e}")
             raise
@@ -90,17 +112,22 @@ class UpstoxWebSocketClient:
     
     async def _maintain_connection(self):
         """Maintain WebSocket connection with automatic reconnection"""
-        while self._running:
+        reconnect_attempts = 0
+        max_reconnect_attempts = 5
+        
+        while self._running and reconnect_attempts < max_reconnect_attempts:
             try:
-                logger.info(f"Connecting to WebSocket: {self._ws_url}")
+                logger.info(f"Connecting to WebSocket (attempt {reconnect_attempts + 1}): {self._ws_url}")
                 
-                headers = {
-                    "Authorization": f"Bearer {self._access_token}"
-                }
+                # Convert headers to list of tuples format for websockets library
+                headers_list = [
+                    ("Authorization", f"Bearer {self._access_token}"),
+                    ("User-Agent", "UpstoxAlgoTrading/1.0")
+                ]
                 
                 async with websockets.connect(
                     self._ws_url,
-                    extra_headers=headers,
+                    additional_headers=headers_list,
                     ping_interval=20,
                     ping_timeout=10,
                     max_size=10 * 1024 * 1024  # 10MB max message size
@@ -175,24 +202,132 @@ class UpstoxWebSocketClient:
     async def _handle_protobuf_message(self, message: bytes):
         """Handle protobuf encoded messages"""
         try:
-            # TODO: Implement protobuf decoding
-            # For now, we'll try to extract basic tick data
-            # This is a simplified approach - in production, use proper protobuf decoding
-            
-            # Parse as JSON for debugging (if it's actually JSON)
+            # Try to decode the protobuf message
             try:
-                text_data = message.decode('utf-8')
-                json_data = json.loads(text_data)
-                await self._handle_json_message(json_data)
-                return
-            except:
-                pass
-            
-            logger.debug(f"Received protobuf message of {len(message)} bytes")
-            # TODO: Implement proper protobuf parsing using the MarketDataFeed.proto
+                from ..proto.MarketDataFeed_pb2 import FeedResponse
+                
+                # Parse the protobuf message
+                feed_response = FeedResponse()
+                feed_response.ParseFromString(message)
+                
+                logger.debug(f"Decoded protobuf message: type={feed_response.type}, feeds={len(feed_response.feeds)}")
+                
+                # Process feeds
+                for instrument_key, feed in feed_response.feeds.items():
+                    await self._process_feed(instrument_key, feed, feed_response.currentTs)
+                
+                # Handle market info if present
+                if feed_response.HasField('marketInfo'):
+                    logger.info(f"Market info: {feed_response.marketInfo}")
+                
+            except ImportError:
+                logger.warning("Protobuf classes not available, falling back to hex analysis")
+                await self._analyze_binary_message(message)
+                
+            except Exception as parse_error:
+                logger.error(f"Protobuf parsing failed: {parse_error}")
+                # Fallback: try as JSON
+                try:
+                    text_data = message.decode('utf-8')
+                    json_data = json.loads(text_data)
+                    await self._handle_json_message(json_data)
+                except:
+                    logger.debug(f"Binary message analysis: {len(message)} bytes, hex: {message[:20].hex()}")
             
         except Exception as e:
             logger.error(f"Error handling protobuf message: {e}")
+    
+    async def _process_feed(self, instrument_key: str, feed: 'Feed', timestamp_ms: int):
+        """Process individual feed data and convert to MarketTickDTO"""
+        try:
+            # Convert timestamp from milliseconds to datetime
+            timestamp = datetime.fromtimestamp(timestamp_ms / 1000.0, tz=timezone.utc)
+            
+            # Extract symbol from instrument key (format: EXCHANGE_SEGMENT|SYMBOL-SERIES)
+            symbol = instrument_key.split('|')[-1].split('-')[0] if '|' in instrument_key else instrument_key
+            
+            # Process based on feed type
+            tick_data = None
+            
+            if feed.HasField('ltpc'):
+                ltpc = feed.ltpc
+                tick_data = MarketTickDTO(
+                    instrument_key=instrument_key,
+                    symbol=symbol,
+                    timestamp=timestamp,
+                    ltp=ltpc.ltp,
+                    ltq=ltpc.ltq,
+                    ltt=ltpc.ltt,
+                    cp=ltpc.cp
+                )
+                
+            elif feed.HasField('fullFeed'):
+                full_feed = feed.fullFeed
+                if full_feed.HasField('marketFF'):
+                    market_ff = full_feed.marketFF
+                    if market_ff.HasField('ltpc'):
+                        ltpc = market_ff.ltpc
+                        tick_data = MarketTickDTO(
+                            instrument_key=instrument_key,
+                            symbol=symbol,
+                            timestamp=timestamp,
+                            ltp=ltpc.ltp,
+                            ltq=ltpc.ltq,
+                            ltt=ltpc.ltt,
+                            cp=ltpc.cp,
+                            volume=market_ff.vtt,
+                            oi=market_ff.oi
+                        )
+                elif full_feed.HasField('indexFF'):
+                    index_ff = full_feed.indexFF
+                    if index_ff.HasField('ltpc'):
+                        ltpc = index_ff.ltpc
+                        tick_data = MarketTickDTO(
+                            instrument_key=instrument_key,
+                            symbol=symbol,
+                            timestamp=timestamp,
+                            ltp=ltpc.ltp,
+                            ltq=ltpc.ltq,
+                            ltt=ltpc.ltt,
+                            cp=ltpc.cp
+                        )
+            
+            # Send tick to callback if we have data
+            if tick_data and self._tick_callback:
+                try:
+                    if asyncio.iscoroutinefunction(self._tick_callback):
+                        await self._tick_callback(tick_data)
+                    else:
+                        self._tick_callback(tick_data)
+                    logger.debug(f"Processed tick for {symbol}: LTP={tick_data.ltp}")
+                except Exception as callback_error:
+                    logger.error(f"Error in tick callback: {callback_error}")
+            
+        except Exception as e:
+            logger.error(f"Error processing feed for {instrument_key}: {e}")
+    
+    async def _analyze_binary_message(self, message: bytes):
+        """Fallback analysis for binary messages when protobuf parsing fails"""
+        logger.debug(f"Analyzing binary message: {len(message)} bytes")
+        
+        # Log first few bytes as hex for debugging
+        hex_preview = message[:50].hex()
+        logger.debug(f"Message hex preview: {hex_preview}")
+        
+        # Try to find patterns that might indicate successful subscription
+        if len(message) > 10:
+            # Look for instrument key patterns in the binary data
+            try:
+                # Try to decode parts as UTF-8 to find instrument names
+                for i in range(0, len(message) - 10, 1):
+                    try:
+                        substr = message[i:i+20].decode('utf-8', errors='ignore')
+                        if any(name in substr for name in ['INFY', 'GOLDBEES', 'NSE']):
+                            logger.info(f"Found instrument reference at offset {i}: {substr}")
+                    except:
+                        continue
+            except Exception as e:
+                logger.debug(f"Binary analysis error: {e}")
     
     async def _handle_json_message(self, data: Dict):
         """Handle JSON messages (market info, feed data, etc.)"""

@@ -117,3 +117,23 @@ export function useLivePrices() {
     refetchInterval: 3000, // Refresh every 3 seconds
   });
 }
+
+// Fetch historical data for selected instruments
+export function useFetchHistoricalData() {
+  const queryClient = useQueryClient();
+  
+  return useMutation({
+    mutationFn: async (daysBack: number = 30): Promise<any> => {
+      const response = await apiClient.post('/api/market-data/fetch-historical', null, {
+        params: { days_back: daysBack }
+      });
+      return response.data;
+    },
+    onSuccess: () => {
+      // Invalidate relevant queries to refresh data
+      queryClient.invalidateQueries({ queryKey: ['live-prices'] });
+      queryClient.invalidateQueries({ queryKey: ['candles'] });
+      queryClient.invalidateQueries({ queryKey: ['market-data-collection-status'] });
+    }
+  });
+}

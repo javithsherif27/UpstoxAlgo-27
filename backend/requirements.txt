@@ -8,6 +8,8 @@ pyjwt==2.9.0
 pytest==8.3.3
 respx==0.22.0
 websockets==12.0
-protobuf==4.25.0
-grpcio-tools==1.60.0
+protobuf>=6.0.0
+# Note: grpcio-tools removed due to Windows compilation issues
+# The protobuf files are already generated in backend/proto/
 tzdata==2024.1
+python-dotenv==1.0.0

@@ -6,6 +6,7 @@ import { InstrumentsPage } from './pages/InstrumentsPage';
 import { MarketDataPage } from './pages/MarketDataPage';
 import { StrategiesPage } from './pages/StrategiesPage';
 import { PortfolioPage } from './pages/PortfolioPage';
+import { TradingPage } from './pages/TradingPage';
 import { ProtectedLayout } from './components/ProtectedLayout';
 
 export const AppRouter: React.FC = () => {
@@ -14,11 +15,12 @@ export const AppRouter: React.FC = () => {
       <Route path="/login" element={<LoginPage />} />
       <Route path="/app" element={<ProtectedLayout />}> 
         <Route path="dashboard" element={<DashboardPage />} />
+        <Route path="trading" element={<TradingPage />} />
         <Route path="instruments" element={<InstrumentsPage />} />
         <Route path="market-data" element={<MarketDataPage />} />
-  <Route path="portfolio" element={<PortfolioPage />} />
+        <Route path="portfolio" element={<PortfolioPage />} />
         <Route path="strategies" element={<StrategiesPage />} />
-        <Route index element={<Navigate to="dashboard" replace />} />
+        <Route index element={<Navigate to="trading" replace />} />
       </Route>
       <Route path="*" element={<Navigate to="/login" replace />} />
     </Routes>

@@ -9,6 +9,97 @@ BASE_URL = os.getenv("UPSTOX_BASE_URL", "https://api.upstox.com/v2")
 
 _client = httpx.AsyncClient(timeout=30.0)  # Increased timeout for large instrument data
 
+class UpstoxClient:
+    """Upstox API client with methods for historical data"""
+    
+    def __init__(self):
+        self.base_url = BASE_URL
+        self.client = _client
+    
+    async def _request(self, path: str, token: str = None):
+        """Make authenticated request to Upstox API"""
+        headers = {}
+        if token:
+            headers["Authorization"] = f"Bearer {token}"
+        
+        try:
+            resp = await self.client.get(self.base_url + path, headers=headers)
+            if resp.status_code >= 400:
+                logger.warning("Upstox error %s %s", resp.status_code, resp.text[:200])
+                resp.raise_for_status()
+            return resp.json()
+        except Exception as e:
+            logger.exception("Upstox request failed: %s", e)
+            raise
+    
+    async def get_historical_candles(self, instrument_key: str, interval: str, from_date: str, to_date: str, token: str = None):
+        """
+        Fetch historical candle data from Upstox API v2
+        
+        Args:
+            instrument_key: Upstox instrument key (e.g., "NSE_EQ|INE009A01021")
+            interval: Candle interval (1minute, 30minute, day, week, month)
+            from_date: Start date in YYYY-MM-DD format
+            to_date: End date in YYYY-MM-DD format
+            token: Access token (optional for testing)
+        
+        Returns:
+            Historical candle data
+        """
+        logger.info(f"Fetching historical candles for {instrument_key} from {from_date} to {to_date}")
+        
+        # For testing without token, return mock data with realistic structure
+        if not token:
+            logger.warning("No token provided, returning mock historical data")
+            return {
+                "status": "success",
+                "data": {
+                    "candles": [
+                        ["2024-10-07T00:00:00+05:30", 94.25, 95.50, 93.80, 94.15, 125000, 0],
+                        ["2024-10-06T00:00:00+05:30", 93.80, 94.60, 93.20, 94.25, 110000, 0],
+                        ["2024-10-05T00:00:00+05:30", 94.10, 94.80, 93.50, 93.80, 98000, 0],
+                    ]
+                }
+            }
+        
+        path = f"/historical-candle/{instrument_key}/{interval}/{to_date}/{from_date}"
+        return await self._request(path, token)
+    
+    async def get_intraday_candles(self, instrument_key: str, interval: str, from_date: str, to_date: str, token: str = None):
+        """
+        Fetch intraday candle data from Upstox API v2
+        
+        Args:
+            instrument_key: Upstox instrument key
+            interval: Candle interval (1minute, 5minute, 15minute, 30minute, 60minute)
+            from_date: Start date in YYYY-MM-DD format  
+            to_date: End date in YYYY-MM-DD format
+            token: Access token (optional for testing)
+        
+        Returns:
+            Intraday candle data
+        """
+        logger.info(f"Fetching intraday candles for {instrument_key}")
+        
+        # For testing without token, return mock data
+        if not token:
+            logger.warning("No token provided, returning mock intraday data")
+            return {
+                "status": "success", 
+                "data": {
+                    "candles": [
+                        ["2024-10-07T09:15:00+05:30", 94.00, 94.25, 93.95, 94.15, 5000, 0],
+                        ["2024-10-07T09:16:00+05:30", 94.15, 94.30, 94.10, 94.20, 3500, 0],
+                    ]
+                }
+            }
+        
+        path = f"/historical-candle/intraday/{instrument_key}/{interval}"
+        return await self._request(path, token)
+
+# Create a singleton instance
+upstox_client = UpstoxClient()
+
 async def _request(path: str, token: str):
     headers = {"Authorization": f"Bearer {token}"}
     try:
@@ -129,3 +220,12 @@ async def get_holdings(token: str):
 async def get_positions(token: str):
     """Get positions from Upstox API"""
     return await _request("/portfolio/short-term-positions", token)
+
+# Standalone functions for backward compatibility
+async def get_historical_candles(instrument_key: str, interval: str, from_date: str, to_date: str, token: str = None):
+    """Backward compatibility function - delegates to upstox_client"""
+    return await upstox_client.get_historical_candles(instrument_key, interval, from_date, to_date, token)
+
+async def get_intraday_candles(instrument_key: str, interval: str, from_date: str, to_date: str, token: str = None):
+    """Backward compatibility function - delegates to upstox_client"""
+    return await upstox_client.get_intraday_candles(instrument_key, interval, from_date, to_date, token)

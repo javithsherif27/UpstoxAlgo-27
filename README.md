@@ -23,21 +23,60 @@ Full-stack demo integrating with Upstox Open API.
 
 ## Local Development
 
-Copy `.env.example` to `.env` and set values.
+### Quick Start (Recommended)
 
-Install backend deps (Python 3.13.7 assumed):
+**Option 1: Full Stack with LocalStack (Best for development)**
+```bash
+# One command to start everything
+dev-launcher.bat
+
+# Or directly:
+start-local.bat
 ```
+This starts LocalStack + Backend + Frontend with local AWS services.
+
+**Option 2: Individual Services**
+```bash
+# Just LocalStack
+start-localstack.bat
+
+# Backend only (auto-detects LocalStack)
+start-backend.bat  
+
+# Frontend only
+start-frontend.bat
+```
+
+### Environment Setup
+
+1. **Install Dependencies**
+```bash
+# Backend (Python 3.13.7 assumed)
 pip install -r backend/requirements.txt
-```
-Install frontend deps:
-```
+
+# Frontend
 cd frontend && npm install
 ```
-Run concurrently (or use make):
-```
-make dev
-```
-Backend will run at `http://127.0.0.1:8000` by uvicorn and frontend at `http://localhost:5173`.
+
+2. **Environment Configuration**
+- `.env.local` - LocalStack development (auto-created)
+- `.env.production` - Production AWS (template provided)
+- LocalStack runs AWS services locally at no cost
+
+3. **Available Services**
+- Frontend: http://localhost:5173
+- Backend API: http://localhost:8000  
+- LocalStack: http://localhost:4566
+- DynamoDB Admin: http://localhost:8001
+
+### LocalStack Benefits
+- ✅ No AWS costs during development
+- ✅ Offline development capability  
+- ✅ Fast iteration cycles
+- ✅ Production parity with real AWS APIs
+- ✅ Team environment consistency
+
+See [LOCALSTACK.md](LOCALSTACK.md) for detailed setup and troubleshooting.
 
 ## EOD Token Expiry
 Client stores token with `expiresAt` set to 23:59:59 IST of current day. On load or API call if expired it is cleared and user redirected to `/login`.
