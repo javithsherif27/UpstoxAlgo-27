@@ -49,7 +49,65 @@ async def stream_stop():
 
 @router.get("/api/candles")
 async def get_candles(symbol: str = Query(...), timeframe: str = Query(...), limit: int = Query(300)):
-    return {"candles": [c.__dict__ for c in aggregator_service.get_candles(symbol, timeframe, limit)]}
+    """Get candles for TradingView chart - bridges to market_data_service database"""
+    try:
+        # First try aggregator service (for live streaming data)
+        agg_candles = aggregator_service.get_candles(symbol, timeframe, limit)
+        if agg_candles:
+            return {"candles": [c.__dict__ for c in agg_candles]}
+        
+        # Fallback to database candles via market_data_service
+        from ..services.instrument_service import instrument_service
+        from ..models.market_data_dto import CandleInterval
+        
+        # Find instrument by symbol
+        selected_instruments = await instrument_service.get_selected_instruments()
+        instrument = None
+        for inst in selected_instruments:
+            if inst.symbol == symbol:
+                instrument = inst
+                break
+        
+        if not instrument:
+            logger.warning(f"Instrument not found for symbol: {symbol}")
+            return {"candles": []}
+        
+        # Map timeframe to our interval enum
+        interval_map = {
+            "1m": CandleInterval.ONE_MINUTE,
+            "5m": CandleInterval.FIVE_MINUTE,
+            "15m": CandleInterval.FIFTEEN_MINUTE,
+            "1h": CandleInterval.ONE_MINUTE,  # Fallback to 1m for 1h
+            "1d": CandleInterval.ONE_DAY
+        }
+        
+        interval = interval_map.get(timeframe, CandleInterval.ONE_DAY)
+        
+        # Get candles from database
+        db_candles = await market_data_service.get_candles(
+            instrument_key=instrument.instrument_key,
+            interval=interval,
+            limit=limit
+        )
+        
+        # Convert to format expected by TradingView
+        candles = []
+        for candle in reversed(db_candles):  # Reverse to get chronological order
+            candles.append({
+                "start": candle.timestamp.isoformat(),
+                "o": candle.open_price,
+                "h": candle.high_price,
+                "l": candle.low_price,
+                "c": candle.close_price,
+                "v": candle.volume
+            })
+        
+        logger.info(f"Returning {len(candles)} candles for {symbol} ({timeframe})")
+        return {"candles": candles}
+        
+    except Exception as e:
+        logger.error(f"Error getting candles for {symbol}: {e}")
+        return {"candles": []}
 
 
 @router.post("/api/stream/ping")

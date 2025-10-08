@@ -11,6 +11,7 @@ USE_LOCALSTACK = os.getenv("USE_LOCALSTACK", "false").lower() == "true"
 
 _table = None
 _local_cache: dict[str, Any] = {}
+_cache_file = "local_cache.json"
 
 def _init_table():
     global _table
@@ -50,10 +51,36 @@ def _init_table():
         _table = None
 
 
+def _load_local_cache():
+    """Load cache from file if it exists"""
+    global _local_cache
+    try:
+        if os.path.exists(_cache_file):
+            with open(_cache_file, 'r') as f:
+                _local_cache = json.load(f)
+                logger.info(f"Loaded local cache from {_cache_file}")
+        else:
+            _local_cache = {}
+    except Exception as e:
+        logger.warning(f"Failed to load local cache: {e}")
+        _local_cache = {}
+
+def _save_local_cache():
+    """Save cache to file"""
+    try:
+        with open(_cache_file, 'w') as f:
+            json.dump(_local_cache, f, indent=2)
+        logger.debug(f"Saved local cache to {_cache_file}")
+    except Exception as e:
+        logger.warning(f"Failed to save local cache: {e}")
+
 async def get_cached(key: str) -> Optional[Any]:
     _init_table()
     if _table is None:
-        # local in-memory fallback
+        # Load cache from file if not already loaded
+        if not _local_cache:
+            _load_local_cache()
+        # local file-backed cache fallback
         return _local_cache.get(key)
     try:
         resp = _table.get_item(Key={"pk": key})
@@ -68,7 +95,11 @@ async def get_cached(key: str) -> Optional[Any]:
 async def put_cached(key: str, value: Any):
     _init_table()
     if _table is None:
+        # Load cache from file if not already loaded
+        if not _local_cache:
+            _load_local_cache()
         _local_cache[key] = value
+        _save_local_cache()  # Persist to file immediately
         return
     try:
         _table.put_item(Item={"pk": key, "data": json.dumps(value)})

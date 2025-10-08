@@ -1,9 +1,11 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { InstrumentSearch } from './InstrumentSearch';
 import { Watchlist } from './Watchlist';
 import { TradingChart } from './TradingChart';
+import { HistoricalDataFetcher } from './HistoricalDataFetcher';
 import { useSelectedInstruments, useSelectInstrument, useDeselectInstrument } from '../queries/useInstruments';
 import { useFetchHistoricalData } from '../queries/useMarketData';
+import { getUpstoxToken, saveUpstoxToken } from '../lib/auth';
 
 interface SelectedInstrument {
   instrumentKey: string;
@@ -13,6 +15,15 @@ interface SelectedInstrument {
 
 export const TradingWorkspace: React.FC = () => {
   const [selectedInstrument, setSelectedInstrument] = useState<SelectedInstrument | null>(null);
+  const [upstoxToken, setUpstoxToken] = useState<string>('');
+  
+  // Load cached token on component mount
+  useEffect(() => {
+    const cachedTokenEntry = getUpstoxToken();
+    if (cachedTokenEntry && cachedTokenEntry.token) {
+      setUpstoxToken(cachedTokenEntry.token);
+    }
+  }, []);
   
   // Get selected instruments from the backend
   const { data: backendSelectedInstruments = [], isLoading } = useSelectedInstruments();
@@ -61,6 +72,17 @@ export const TradingWorkspace: React.FC = () => {
     fetchHistoricalMutation.mutate(30); // Fetch last 30 days
   };
 
+  const handleTokenChange = (newToken: string) => {
+    setUpstoxToken(newToken);
+    // Auto-save to cache when token is entered manually
+    if (newToken.trim()) {
+      // Set expiry to end of current day (tokens typically expire daily)
+      const endOfDay = new Date();
+      endOfDay.setHours(23, 59, 59, 999);
+      saveUpstoxToken(newToken.trim(), endOfDay.toISOString());
+    }
+  };
+
   return (
     <div className="h-screen flex flex-col bg-gray-50">
       {/* Top Navigation Bar */}
@@ -81,8 +103,18 @@ export const TradingWorkspace: React.FC = () => {
             <InstrumentSearch onAddToWatchlist={handleAddToWatchlist} />
           </div>
 
-          {/* User Info */}
+          {/* Token Input & User Info */}
           <div className="flex items-center space-x-3">
+            <div className="flex items-center space-x-2">
+              <input
+                type="text"
+                placeholder="Upstox Token (for data fetch)"
+                value={upstoxToken}
+                onChange={(e) => handleTokenChange(e.target.value)}
+                className="px-3 py-1 text-sm border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-blue-500 w-48"
+              />
+              <div className={`w-2 h-2 rounded-full ${upstoxToken ? 'bg-green-500' : 'bg-gray-300'}`}></div>
+            </div>
             <div className="text-sm text-gray-600">
               <div className="font-medium">Portfolio: ₹0.00</div>
             </div>
@@ -104,22 +136,12 @@ export const TradingWorkspace: React.FC = () => {
                 <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-500"></div>
               )}
             </div>
-            {/* Historical Data Fetch Button */}
+            {/* Enhanced Historical Data Fetcher */}
             {watchlistInstruments.length > 0 && (
-              <button
-                onClick={handleFetchHistoricalData}
-                disabled={fetchHistoricalMutation.isPending}
-                className="w-full px-3 py-1.5 text-xs bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                {fetchHistoricalMutation.isPending ? (
-                  <div className="flex items-center justify-center">
-                    <div className="animate-spin rounded-full h-3 w-3 border-b border-blue-600 mr-1"></div>
-                    Fetching Historical Data...
-                  </div>
-                ) : (
-                  '📊 Fetch Historical Data (30 days)'
-                )}
-              </button>
+              <HistoricalDataFetcher 
+                token={upstoxToken || null}
+                className="mb-3"
+              />
             )}
           </div>
           <div className="flex-1 overflow-hidden">

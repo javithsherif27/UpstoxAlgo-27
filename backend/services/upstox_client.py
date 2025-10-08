@@ -34,11 +34,11 @@ class UpstoxClient:
     
     async def get_historical_candles(self, instrument_key: str, interval: str, from_date: str, to_date: str, token: str = None):
         """
-        Fetch historical candle data from Upstox API v2
+        Fetch historical candle data from Upstox API V3
         
         Args:
             instrument_key: Upstox instrument key (e.g., "NSE_EQ|INE009A01021")
-            interval: Candle interval (1minute, 30minute, day, week, month)
+            interval: Candle interval - supports 1m, 5m, 15m, 1d formats
             from_date: Start date in YYYY-MM-DD format
             to_date: End date in YYYY-MM-DD format
             token: Access token (optional for testing)
@@ -46,7 +46,7 @@ class UpstoxClient:
         Returns:
             Historical candle data
         """
-        logger.info(f"Fetching historical candles for {instrument_key} from {from_date} to {to_date}")
+        logger.info(f"Fetching {interval} candles for {instrument_key} from {from_date} to {to_date}")
         
         # For testing without token, return mock data with realistic structure
         if not token:
@@ -62,8 +62,57 @@ class UpstoxClient:
                 }
             }
         
-        path = f"/historical-candle/{instrument_key}/{interval}/{to_date}/{from_date}"
-        return await self._request(path, token)
+        # Validate dates - no future dates allowed
+        from datetime import datetime, timedelta
+        today = datetime.now().date()
+        to_date_obj = datetime.strptime(to_date, "%Y-%m-%d").date()
+        from_date_obj = datetime.strptime(from_date, "%Y-%m-%d").date()
+        
+        if to_date_obj > today:
+            # Adjust to yesterday at latest
+            to_date = (today - timedelta(days=1)).strftime("%Y-%m-%d")
+            logger.warning(f"Adjusted to_date from future date to: {to_date}")
+        
+        if from_date_obj > today:
+            # Adjust from_date if it's also in future
+            from_date = (today - timedelta(days=7)).strftime("%Y-%m-%d")
+            logger.warning(f"Adjusted from_date from future date to: {from_date}")
+        
+        # Map intervals to V3 API format: /{unit}/{interval_value}
+        # Based on documentation: minutes supports 1,2,3,...,300 and days supports 1
+        interval_mapping = {
+            "1m": ("minutes", "1"),      # 1-minute interval
+            "5m": ("minutes", "5"),      # 5-minute interval  
+            "15m": ("minutes", "15"),    # 15-minute interval
+            "1d": ("days", "1"),         # Daily interval
+        }
+        
+        if interval not in interval_mapping:
+            raise ValueError(f"Unsupported interval: {interval}. Supported intervals: 1m, 5m, 15m, 1d")
+        
+        unit, interval_value = interval_mapping[interval]
+        
+        # V3 API format: /v3/historical-candle/{instrument_key}/{unit}/{interval}/{to_date}/{from_date}
+        # Note: We need to change the base URL to v3 for this endpoint
+        v3_base_url = self.base_url.replace('/v2', '/v3')
+        path = f"/historical-candle/{instrument_key}/{unit}/{interval_value}/{to_date}/{from_date}"
+        
+        logger.info(f"Using V3 API endpoint: {v3_base_url}{path}")
+        
+        # Make direct request with V3 URL
+        headers = {}
+        if token:
+            headers["Authorization"] = f"Bearer {token}"
+        
+        try:
+            resp = await self.client.get(v3_base_url + path, headers=headers)
+            if resp.status_code >= 400:
+                logger.warning("Upstox V3 API error %s %s", resp.status_code, resp.text[:200])
+                resp.raise_for_status()
+            return resp.json()
+        except Exception as e:
+            logger.exception("Upstox V3 request failed: %s", e)
+            raise
     
     async def get_intraday_candles(self, instrument_key: str, interval: str, from_date: str, to_date: str, token: str = None):
         """

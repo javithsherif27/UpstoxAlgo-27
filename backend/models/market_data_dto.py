@@ -5,9 +5,9 @@ from enum import Enum
 
 class CandleInterval(str, Enum):
     ONE_MINUTE = "1m"
-    FIVE_MINUTE = "5m"
-    FIFTEEN_MINUTE = "15m"
-    ONE_DAY = "1d"
+    FIVE_MINUTE = "5m"          # Supported by Upstox V3 API: minutes/5
+    FIFTEEN_MINUTE = "15m"      # Supported by Upstox V3 API: minutes/15
+    ONE_DAY = "1d"             # Supported by Upstox V3 API: days/1
 
 class MarketTickDTO(BaseModel):
     """Raw tick data from WebSocket"""

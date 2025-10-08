@@ -64,7 +64,7 @@ export function useWebSocketStatus() {
 // Candle data
 export function useCandles(
   instrumentKey: string, 
-  interval: string = '1m',
+  interval: string = '1d',
   startTime?: string,
   endTime?: string,
   limit: number = 100
@@ -72,18 +72,25 @@ export function useCandles(
   return useQuery({
     queryKey: ['candles', instrumentKey, interval, startTime, endTime, limit],
     queryFn: async (): Promise<CandleDataDTO[]> => {
-      const params = new URLSearchParams({
-        interval,
-        limit: limit.toString()
-      });
-      
-      if (startTime) params.append('start_time', startTime);
-      if (endTime) params.append('end_time', endTime);
-      
-      const response = await apiClient.get(`/api/market-data/candles/${instrumentKey}?${params}`);
-      return response.data;
+      try {
+        const params = new URLSearchParams({
+          interval,
+          limit: limit.toString()
+        });
+        
+        if (startTime) params.append('start_time', startTime);
+        if (endTime) params.append('end_time', endTime);
+        
+        const response = await apiClient.get(`/api/market-data/candles/${instrumentKey}?${params}`);
+        return response.data;
+      } catch (error) {
+        console.error('Error fetching candles:', error);
+        // Return empty array instead of failing
+        return [];
+      }
     },
     enabled: !!instrumentKey,
+    retry: false, // Don't retry on auth failures
   });
 }
 

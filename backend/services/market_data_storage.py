@@ -169,7 +169,7 @@ class MarketDataStorage:
                         instrument_key=row[0],
                         symbol=row[1],
                         interval=CandleInterval(row[2]),
-                        timestamp=datetime.fromisoformat(row[3]),
+                        timestamp=row[3] if isinstance(row[3], datetime) else datetime.fromisoformat(row[3]),
                         open_price=row[4],
                         high_price=row[5],
                         low_price=row[6],

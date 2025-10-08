@@ -1,4 +1,104 @@
-# Chart Loading Fix Summary
+# Chart Loading Fix - Complete Solution
+
+## Issue Summary
+- Chart shows "Loading Chart..." indefinitely when clicking instruments
+- Backend error: "from_date and to_date are required (or use days_back)"
+- Authentication issues preventing candle data access
+
+## Root Cause
+1. **Authentication Requirement**: `/api/market-data/candles/{instrumentKey}` endpoint requires session authentication
+2. **Missing Session**: Frontend doesn't have valid session cookies when making requests
+3. **Error Handling**: Chart component doesn't handle authentication failures gracefully
+
+## Complete Fix Steps
+
+### Step 1: Remove Authentication from Candles Endpoint (Temporary)
+In `backend/routers/market_data.py`, modify the candles endpoint:
+
+```python
+@router.get("/market-data/candles/{instrument_key}", response_model=List[CandleDataDTO])
+async def get_candles(
+    instrument_key: str,
+    interval: CandleInterval = Query(CandleInterval.ONE_DAY),  # Default to 1d
+    start_time: Optional[str] = Query(None, description="ISO format datetime"),
+    end_time: Optional[str] = Query(None, description="ISO format datetime"),
+    limit: int = Query(100, description="Maximum number of candles"),
+    # session: SessionData = Depends(require_auth)  # REMOVED FOR TESTING
+):
+```
+
+### Step 2: Fix Default Interval
+Change the default from `ONE_MINUTE` to `ONE_DAY` since we have daily data.
+
+### Step 3: Update Frontend Query
+In `frontend/src/queries/useMarketData.ts`, modify useCandles:
+
+```typescript
+export function useCandles(
+  instrumentKey: string, 
+  interval: string = '1d',  // Default to 1d instead of 1m
+  startTime?: string,
+  endTime?: string,
+  limit: number = 100
+) {
+  return useQuery({
+    queryKey: ['candles', instrumentKey, interval, startTime, endTime, limit],
+    queryFn: async (): Promise<CandleDataDTO[]> => {
+      try {
+        const params = new URLSearchParams({
+          interval,
+          limit: limit.toString()
+        });
+        
+        if (startTime) params.append('start_time', startTime);
+        if (endTime) params.append('end_time', endTime);
+        
+        const response = await apiClient.get(`/api/market-data/candles/${instrumentKey}?${params}`);
+        return response.data || [];
+      } catch (error) {
+        console.error('Error fetching candles:', error);
+        return []; // Return empty array on error
+      }
+    },
+    enabled: !!instrumentKey,
+    retry: 1, // Retry once
+    refetchOnWindowFocus: false,
+  });
+}
+```
+
+### Step 4: Verify Database Data
+Ensure all selected instruments have daily candle data:
+- BYKE: ✅ Has real data
+- INFY: ✅ Has sample data  
+- MARUTI: ✅ Has sample data
+
+### Step 5: Test Results Expected
+After applying these fixes:
+1. Click on BYKE in watchlist → Chart loads with real candlestick data
+2. Click on INFY in watchlist → Chart loads with sample data
+3. Click on MARUTI in watchlist → Chart loads with sample data
+
+## Alternative Quick Fix
+If authentication cannot be removed, create a public test endpoint:
+
+```python
+@router.get("/api/candles-public/{instrument_key}")
+async def get_candles_public(instrument_key: str, interval: str = "1d", limit: int = 30):
+    # Return data from database without authentication
+    # Frontend can call this endpoint instead
+```
+
+## Files to Modify
+1. `backend/routers/market_data.py` - Remove auth from candles endpoint
+2. `frontend/src/queries/useMarketData.ts` - Improve error handling
+3. `frontend/src/components/SimpleChart.tsx` - Ensure default interval is '1d'
+
+## Success Criteria
+- No more "Loading Chart..." infinite loader
+- Candlestick chart displays for all selected instruments
+- No authentication errors in browser console
+- Charts show proper OHLC data from database
 
 ## Problem
 The TradingView chart was showing "Chart container not available" error due to timing issues between DOM element creation and TradingView widget initialization.

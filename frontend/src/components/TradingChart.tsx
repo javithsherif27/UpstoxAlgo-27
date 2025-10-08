@@ -1,5 +1,5 @@
-import React from 'react';
-import { TVChart } from './TVChart';
+import React, { useState } from 'react';
+import { SimpleChart } from './SimpleChart';
 import { useLivePrices } from '../queries/useMarketData';
 
 interface Instrument {
@@ -13,8 +13,16 @@ interface TradingChartProps {
 }
 
 export const TradingChart: React.FC<TradingChartProps> = ({ instrument }) => {
+  const [selectedInterval, setSelectedInterval] = useState('1d');
   const { data: livePrices } = useLivePrices();
   const priceData = livePrices?.prices?.[instrument.instrumentKey];
+
+  const intervals = [
+    { value: '1m', label: '1M', name: '1 Minute' },
+    { value: '5m', label: '5M', name: '5 Minutes' },
+    { value: '15m', label: '15M', name: '15 Minutes' },
+    { value: '1d', label: '1D', name: '1 Day' },
+  ];
 
   const formatPrice = (price: number) => {
     return price?.toFixed(2) || '0.00';
@@ -30,79 +38,102 @@ export const TradingChart: React.FC<TradingChartProps> = ({ instrument }) => {
     <div className="flex flex-col h-full bg-white">
       {/* Chart Header */}
       <div className="px-4 py-3 border-b border-gray-200 bg-white">
-        <div className="flex items-center justify-between">
+        {/* Top Row - Symbol and Interval Controls */}
+        <div className="flex items-center justify-between mb-3">
           <div className="flex items-center space-x-4">
             <div>
               <h3 className="text-lg font-semibold text-gray-900">{instrument.symbol}</h3>
               <p className="text-sm text-gray-600">{instrument.name}</p>
             </div>
-            
-            {priceData && (
-              <div className="flex items-center space-x-6 text-sm">
-                <div className="flex items-center space-x-2">
-                  <span className="text-gray-500">LTP:</span>
-                  <span className="font-semibold text-lg">₹{formatPrice(priceData.ltp)}</span>
-                </div>
-                
-                <div className={`flex items-center space-x-1 ${getChangeColor(priceData.change || 0)}`}>
-                  <span>{priceData.change > 0 ? '▲' : priceData.change < 0 ? '▼' : '●'}</span>
-                  <span className="font-medium">
-                    {Math.abs(priceData.change || 0).toFixed(2)} ({priceData.change_percent?.toFixed(2)}%)
-                  </span>
-                </div>
-              </div>
-            )}
           </div>
 
-          {/* Chart Controls */}
-          <div className="flex items-center space-x-2">
-            <div className="flex bg-gray-100 rounded-md p-1">
-              <button className="px-3 py-1 text-sm bg-white rounded shadow-sm font-medium">1D</button>
-              <button className="px-3 py-1 text-sm text-gray-600 hover:bg-gray-50 rounded font-medium">5D</button>
-              <button className="px-3 py-1 text-sm text-gray-600 hover:bg-gray-50 rounded font-medium">1M</button>
-              <button className="px-3 py-1 text-sm text-gray-600 hover:bg-gray-50 rounded font-medium">3M</button>
+          {/* Chart Interval Controls - Always visible */}
+          <div className="flex items-center space-x-2 bg-white">
+            <span className="text-sm font-medium text-gray-700 mr-2">Timeframe:</span>
+            <div className="flex bg-gray-100 rounded-lg p-1 shadow-sm">
+              {intervals.map((interval) => (
+                <button
+                  key={interval.value}
+                  onClick={() => {
+                    console.log(`Switching to interval: ${interval.value}`);
+                    setSelectedInterval(interval.value);
+                  }}
+                  className={`px-4 py-2 text-sm font-medium rounded-md transition-all duration-200 min-w-[50px] ${
+                    selectedInterval === interval.value
+                      ? 'bg-blue-500 text-white shadow-md transform scale-105'
+                      : 'text-gray-700 hover:bg-white hover:shadow-sm hover:text-blue-600'
+                  }`}
+                  title={`Switch to ${interval.name} chart`}
+                >
+                  {interval.label}
+                </button>
+              ))}
             </div>
           </div>
         </div>
 
+        {/* Second Row - Price Information */}
+        {priceData && (
+          <div className="flex items-center space-x-6 text-sm">
+            <div className="flex items-center space-x-2">
+              <span className="text-gray-500">LTP:</span>
+              <span className="font-semibold text-lg">₹{formatPrice(priceData.ltp)}</span>
+            </div>
+            
+            <div className={`flex items-center space-x-1 ${getChangeColor(priceData.change || 0)}`}>
+              <span>{priceData.change > 0 ? '▲' : priceData.change < 0 ? '▼' : '●'}</span>
+              <span className="font-medium">
+                {Math.abs(priceData.change || 0).toFixed(2)} ({priceData.change_percent?.toFixed(2)}%)
+              </span>
+            </div>
+          </div>
+        )}
+
         {/* Market Info Bar */}
         {priceData && (
-          <div className="mt-3 grid grid-cols-6 gap-4 text-sm">
-            <div>
-              <span className="text-gray-500">Open:</span>
-              <span className="ml-1 font-medium">₹{formatPrice(priceData.open)}</span>
-            </div>
-            <div>
-              <span className="text-gray-500">High:</span>
-              <span className="ml-1 font-medium text-green-600">₹{formatPrice(priceData.high)}</span>
-            </div>
-            <div>
-              <span className="text-gray-500">Low:</span>
-              <span className="ml-1 font-medium text-red-600">₹{formatPrice(priceData.low)}</span>
-            </div>
-            <div>
-              <span className="text-gray-500">Volume:</span>
-              <span className="ml-1 font-medium">{(priceData.volume || 0).toLocaleString()}</span>
-            </div>
-            <div>
-              <span className="text-gray-500">Prev Close:</span>
-              <span className="ml-1 font-medium">₹{formatPrice((priceData.ltp || 0) - (priceData.change || 0))}</span>
-            </div>
-            <div>
-              <span className="text-gray-500">Market Cap:</span>
-              <span className="ml-1 font-medium">N/A</span>
+          <div className="mt-3 pt-3 border-t border-gray-100">
+            <div className="grid grid-cols-6 gap-4 text-sm">
+              <div>
+                <span className="text-gray-500">Open:</span>
+                <span className="ml-1 font-medium">₹{formatPrice(priceData.open)}</span>
+              </div>
+              <div>
+                <span className="text-gray-500">High:</span>
+                <span className="ml-1 font-medium text-green-600">₹{formatPrice(priceData.high)}</span>
+              </div>
+              <div>
+                <span className="text-gray-500">Low:</span>
+                <span className="ml-1 font-medium text-red-600">₹{formatPrice(priceData.low)}</span>
+              </div>
+              <div>
+                <span className="text-gray-500">Volume:</span>
+                <span className="ml-1 font-medium">{(priceData.volume || 0).toLocaleString()}</span>
+              </div>
+              <div>
+                <span className="text-gray-500">Prev Close:</span>
+                <span className="ml-1 font-medium">₹{formatPrice((priceData.ltp || 0) - (priceData.change || 0))}</span>
+              </div>
+              <div>
+                <span className="text-gray-500">Market Cap:</span>
+                <span className="ml-1 font-medium">N/A</span>
+              </div>
             </div>
           </div>
         )}
       </div>
 
       {/* Chart Area */}
-      <div className="flex-1 p-4">
-        <div className="h-full w-full">
-          <TVChart 
-            symbol={instrument.symbol}
-            instrumentKey={instrument.instrumentKey}
-            height={window.innerHeight - 200} // Adjust height based on header
+      <div className="flex-1 p-4 bg-gray-50">
+        {/* Debug Info */}
+        <div className="mb-2 text-xs text-gray-500 bg-white px-2 py-1 rounded border inline-block">
+          Current Interval: <span className="font-mono font-semibold text-blue-600">{selectedInterval}</span>
+        </div>
+        
+        <div className="h-full w-full bg-white rounded-lg shadow-sm border">
+          <SimpleChart 
+            instrument={instrument}
+            interval={selectedInterval}
+            height={window.innerHeight - 240} // Adjust height for new header and debug info
           />
         </div>
       </div>

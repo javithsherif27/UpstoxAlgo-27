@@ -172,5 +172,46 @@ class InstrumentService:
             logger.error(f"Error parsing selected instrument keys: {e}")
             return set()
 
+    async def get_instrument_by_symbol(self, symbol: str, token: Optional[str] = None) -> Optional[InstrumentDTO]:
+        """Find an instrument by trading symbol.
+
+        If cache is empty or symbol not found and a token is provided, attempt a cache refresh.
+        """
+        if not symbol:
+            return None
+
+        # First try cached instruments
+        instruments = await self.get_cached_instruments()
+
+        # If cache empty and token provided, refresh
+        if (not instruments or len(instruments) == 0) and token:
+            try:
+                await self.refresh_instruments_cache(token)
+                instruments = await self.get_cached_instruments()
+            except Exception as e:
+                logger.warning(f"Failed to refresh instruments cache: {e}")
+
+        # Search by symbol (case-insensitive)
+        sym = symbol.strip().upper()
+        for inst in instruments:
+            try:
+                if inst.symbol and inst.symbol.upper() == sym:
+                    return inst
+            except Exception:
+                continue
+
+        # If still not found and token provided, try one more refresh just in case
+        if token:
+            try:
+                await self.refresh_instruments_cache(token)
+                instruments = await self.get_cached_instruments()
+                for inst in instruments:
+                    if inst.symbol and inst.symbol.upper() == sym:
+                        return inst
+            except Exception as e:
+                logger.warning(f"Second attempt to refresh instruments cache failed: {e}")
+
+        return None
+
 # Global service instance
 instrument_service = InstrumentService()
