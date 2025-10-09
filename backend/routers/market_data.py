@@ -1,7 +1,6 @@
 from fastapi import APIRouter, Depends, Header, HTTPException, Request, Query
 from typing import List, Optional
 from datetime import datetime
-import sqlite3
 from ..services.auth_service import verify_session_jwt, SessionData
 from ..services.market_data_service import market_data_service
 from ..models.market_data_dto import (
@@ -75,6 +74,25 @@ async def start_market_data_collection(
         logger.error(f"Error starting market data collection: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+
+# Lightweight start endpoint without session auth (for local testing/FE start)
+@router.post("/market-data/start-noauth")
+async def start_market_data_collection_noauth(
+    x_upstox_access_token: str = Header(alias="X-Upstox-Access-Token"),
+):
+    """Start WebSocket connection and market data collection without session auth.
+    Useful for local testing or when FE can't set the app_session cookie yet.
+    """
+    try:
+        success = await market_data_service.start_data_collection(x_upstox_access_token)
+        if success:
+            return {"status": "ok", "message": "Market data collection started (noauth)"}
+        else:
+            raise HTTPException(status_code=500, detail="Failed to start market data collection")
+    except Exception as e:
+        logger.error(f"Error starting (noauth) market data collection: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 @router.post("/market-data/stop")
 async def stop_market_data_collection(
     session: SessionData = Depends(require_auth)
@@ -92,6 +110,19 @@ async def stop_market_data_collection(
         logger.error(f"Error stopping market data collection: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+@router.post("/market-data/stop-noauth")
+async def stop_market_data_collection_noauth():
+    """Stop market data collection without session auth (local testing)."""
+    try:
+        success = await market_data_service.stop_data_collection()
+        if success:
+            return {"status": "ok", "message": "Market data collection stopped (noauth)"}
+        else:
+            raise HTTPException(status_code=500, detail="Failed to stop market data collection")
+    except Exception as e:
+        logger.error(f"Error stopping (noauth) market data collection: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 @router.get("/market-data/status", response_model=WebSocketStatusDTO)
 async def get_market_data_status(
     session: SessionData = Depends(require_auth)
@@ -107,6 +138,21 @@ async def get_collection_status(
     ws_status = market_data_service.get_websocket_status()
     is_collecting = market_data_service.is_data_collection_active()
     
+    return {
+        "is_collecting": is_collecting,
+        "is_connected": ws_status.is_connected,
+        "subscribed_instruments_count": len(ws_status.subscribed_instruments),
+        "total_ticks_received": ws_status.total_ticks_received,
+        "connection_time": ws_status.connection_time,
+        "last_heartbeat": ws_status.last_heartbeat,
+        "recent_errors": ws_status.errors
+    }
+
+@router.get("/market-data/collection-status-noauth")
+async def get_collection_status_noauth():
+    """Get data collection status without session auth (for local/dev UI indicators)."""
+    ws_status = market_data_service.get_websocket_status()
+    is_collecting = market_data_service.is_data_collection_active()
     return {
         "is_collecting": is_collecting,
         "is_connected": ws_status.is_connected,
@@ -742,25 +788,30 @@ async def get_fetch_status(
         queue_size = historical_data_manager.fetcher.request_queue.qsize()
         active_requests = historical_data_manager.fetcher.active_requests
         
-        # Get database statistics
-        conn = sqlite3.connect('market_data.db')
-        cursor = conn.cursor()
+        # Get database statistics from PostgreSQL
+        from ..lib.database import db_manager
         
-        # Count by interval
-        cursor.execute("SELECT interval, COUNT(*) as count FROM candles GROUP BY interval")
-        interval_counts = {row[0]: row[1] for row in cursor.fetchall()}
-        
-        # Total candles
-        cursor.execute("SELECT COUNT(*) FROM candles")
-        total_candles = cursor.fetchone()[0]
-        
-        # Latest timestamp per interval
-        cursor.execute("""
-            SELECT interval, MAX(timestamp) as latest_timestamp
-            FROM candles 
-            GROUP BY interval
-        """)
-        latest_data = {row[0]: row[1] for row in cursor.fetchall()}
+        try:
+            async with db_manager.get_connection() as conn:
+                # Count by interval
+                interval_rows = await conn.fetch("SELECT interval, COUNT(*) as count FROM candles GROUP BY interval")
+                interval_counts = {row['interval']: row['count'] for row in interval_rows}
+                
+                # Total candles
+                total_candles = await conn.fetchval("SELECT COUNT(*) FROM candles")
+                
+                # Latest timestamp per interval
+                latest_rows = await conn.fetch("""
+                    SELECT interval, MAX(timestamp) as latest_timestamp
+                    FROM candles 
+                    GROUP BY interval
+                """)
+                latest_data = {row['interval']: row['latest_timestamp'].isoformat() if row['latest_timestamp'] else None for row in latest_rows}
+        except Exception as e:
+            logger.error(f"Error getting database statistics: {e}")
+            interval_counts = {}
+            total_candles = 0
+            latest_data = {}
         
         conn.close()
         

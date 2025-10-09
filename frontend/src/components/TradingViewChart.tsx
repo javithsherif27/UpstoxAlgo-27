@@ -1,6 +1,10 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { createChart, ColorType, IChartApi, ISeriesApi, CandlestickData } from 'lightweight-charts';
 import { useCandles } from '../queries/useMarketData';
+import { useQueryClient } from '@tanstack/react-query';
+import { apiClient } from '../lib/api';
+import { getUpstoxToken } from '../lib/auth';
+import { uiStream, StreamEvent } from '../lib/ws';
 
 interface Instrument {
   instrumentKey: string;
@@ -38,6 +42,10 @@ export const TradingViewChart: React.FC<TradingViewChartProps> = ({
   const chartRef = useRef<IChartApi | null>(null);
   const candlestickSeriesRef = useRef<ISeriesApi<'Candlestick'> | null>(null);
   const volumeSeriesRef = useRef<ISeriesApi<'Histogram'> | null>(null);
+  const queryClient = useQueryClient();
+  const attemptedAutoFetch = useRef<Set<string>>(new Set());
+  const [autoFetchStatus, setAutoFetchStatus] = useState<'idle' | 'fetching' | 'done' | 'error'>('idle');
+  const [autoFetchMessage, setAutoFetchMessage] = useState<string>('');
   
   // Ensure a sensible minimum height to avoid 0/negative heights in hidden/flex parents
   const effectiveHeight = Math.max(240, height || 0);
@@ -237,6 +245,88 @@ export const TradingViewChart: React.FC<TradingViewChartProps> = ({
     }
   }, [candlesData]);
 
+  // Live updates via websocket
+  useEffect(() => {
+    uiStream.connect();
+    const off = uiStream.on((evt: StreamEvent) => {
+      if (!candlestickSeriesRef.current || !chartRef.current) return;
+      // Only react to current instrument
+      if (evt.instrument_key !== instrument.instrumentKey) return;
+      if (evt.type === 'candle') {
+        const t = Math.floor(new Date(evt.timestamp).getTime() / 1000);
+        // Only apply if interval matches current chart interval
+        if (evt.interval !== interval) return;
+        candlestickSeriesRef.current.update({
+          time: t as any,
+          open: evt.open,
+          high: evt.high,
+          low: evt.low,
+          close: evt.close,
+        });
+      } else if (evt.type === 'tick') {
+        // Optional: nudge the last bar's close with LTP for ultra-real-time effect
+        // We won't change OHLC here to avoid conflicting with server aggregation
+      }
+    });
+    return () => {
+      off();
+    };
+  }, [instrument.instrumentKey, interval]);
+
+  // Auto-fetch historical data for the selected interval if none exists (helps 1m/5m on first use)
+  useEffect(() => {
+    const key = `${instrument.instrumentKey}:${interval}`;
+    if (isLoading) return;
+    if (candlesData && candlesData.length > 0) {
+      setAutoFetchStatus('idle');
+      setAutoFetchMessage('');
+      return;
+    }
+    // Avoid repeated attempts in one session
+    if (attemptedAutoFetch.current.has(key)) return;
+
+    // Only attempt for supported intervals
+    const intervalToEndpoint: Record<string, { url: string; days: number; label: string }> = {
+      '1m': { url: '/api/market-data/fetch-historical-1m', days: 7, label: '1-minute' },
+      '5m': { url: '/api/market-data/fetch-historical-5m', days: 15, label: '5-minute' },
+      '15m': { url: '/api/market-data/fetch-historical-15m', days: 30, label: '15-minute' },
+      '1d': { url: '/api/market-data/fetch-historical-1d', days: 365, label: 'daily' },
+    };
+
+    const cfg = intervalToEndpoint[interval];
+    if (!cfg) return;
+
+    const tokenEntry = getUpstoxToken();
+    if (!tokenEntry) {
+      // No token, skip auto fetch for protected endpoints
+      attemptedAutoFetch.current.add(key);
+      setAutoFetchStatus('error');
+      setAutoFetchMessage('Login required to fetch historical data for this interval.');
+      return;
+    }
+
+    // Fire and refetch
+    (async () => {
+      try {
+        setAutoFetchStatus('fetching');
+        setAutoFetchMessage(`Fetching ${cfg.label} historical data…`);
+        await apiClient.post(`${cfg.url}?days_back=${cfg.days}`, null, {
+          headers: { 'X-Upstox-Access-Token': tokenEntry.token },
+        });
+        attemptedAutoFetch.current.add(key);
+        setAutoFetchStatus('done');
+        setAutoFetchMessage('');
+        // Refetch the candles for this instrument/interval
+        await queryClient.invalidateQueries({ queryKey: ['candles', instrument.instrumentKey, interval] });
+      } catch (e: any) {
+        attemptedAutoFetch.current.add(key);
+        setAutoFetchStatus('error');
+        setAutoFetchMessage(e?.message || 'Failed to fetch historical data');
+        console.error('Auto-fetch historical failed:', e);
+      }
+    })();
+  }, [instrument.instrumentKey, interval, isLoading, candlesData, queryClient]);
+
   return (
   <div className="relative bg-white rounded-lg shadow-sm border overflow-hidden" style={{ height: effectiveHeight }}>
       {/* Chart Container (always rendered to ensure ref is available) */}
@@ -252,26 +342,26 @@ export const TradingViewChart: React.FC<TradingViewChartProps> = ({
       </div>
 
       {/* Loading overlay */}
-      {isLoading && (
+      {(isLoading || autoFetchStatus === 'fetching') && (
         <div className="absolute inset-0 flex items-center justify-center bg-white/70">
           <div className="text-center">
             <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500 mx-auto mb-2"></div>
-            <div className="text-sm text-gray-700">Loading TradingView Chart…</div>
+            <div className="text-sm text-gray-700">{autoFetchStatus === 'fetching' ? autoFetchMessage : 'Loading TradingView Chart…'}</div>
           </div>
         </div>
       )}
 
       {/* Error / Empty overlay (only if not loading) */}
-      {!isLoading && (error || !candlesData || candlesData.length === 0) && (
+      {!isLoading && autoFetchStatus !== 'fetching' && (error || !candlesData || candlesData.length === 0) && (
         <div className="absolute inset-0 flex items-center justify-center bg-white/80">
           <div className="text-center p-6">
             <div className="text-4xl text-gray-400 mb-4">📊</div>
             <div className="text-lg font-semibold text-gray-700 mb-2">{instrument.symbol}</div>
             <div className="text-sm text-gray-600 mb-3">
-              {error ? 'Failed to load chart data' : `No ${interval} chart data available`}
+              {autoFetchStatus === 'error' ? autoFetchMessage : error ? 'Failed to load chart data' : `No ${interval} chart data available`}
             </div>
             <div className="text-xs text-gray-500 mt-2">
-              {error ? 'Please try refreshing the page' : `Use "Historical Data Fetch" to get ${interval} candles`}
+              {autoFetchStatus === 'error' ? 'Please login and try again' : error ? 'Please try refreshing the page' : `Use "Historical Data Fetch" to get ${interval} candles`}
             </div>
             <div className="text-xs text-blue-500 mt-1">Available intervals: 1m, 5m, 15m, 1d</div>
           </div>

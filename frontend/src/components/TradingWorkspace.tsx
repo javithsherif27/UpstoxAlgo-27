@@ -119,14 +119,13 @@ export const TradingWorkspace: React.FC = () => {
           {/* Token Input & User Info */}
           <div className="flex items-center space-x-3">
             <div className="flex items-center space-x-2">
-              <input
-                type="text"
-                placeholder="Upstox Token (for data fetch)"
-                value={upstoxToken}
-                onChange={(e) => handleTokenChange(e.target.value)}
-                className="px-3 py-1 text-sm border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-blue-500 w-48"
-              />
-              <div className={`w-2 h-2 rounded-full ${upstoxToken ? 'bg-green-500' : 'bg-gray-300'}`}></div>
+              <div className="flex items-center space-x-2 px-3 py-1 text-sm border border-gray-300 rounded bg-gray-50">
+                <span className="text-gray-600">Connection:</span>
+                <div className={`w-2 h-2 rounded-full ${upstoxToken ? 'bg-green-500' : 'bg-red-500'}`}></div>
+                <span className={`text-sm ${upstoxToken ? 'text-green-600' : 'text-red-600'}`}>
+                  {upstoxToken ? 'Connected' : 'Disconnected'}
+                </span>
+              </div>
             </div>
             <div className="text-sm text-gray-600">
               <div className="font-medium">Portfolio: ₹0.00</div>

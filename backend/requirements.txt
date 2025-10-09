@@ -13,3 +13,6 @@ protobuf>=6.0.0
 # The protobuf files are already generated in backend/proto/
 tzdata==2024.1
 python-dotenv==1.0.0
+# PostgreSQL support
+asyncpg==0.29.0
+psycopg2-binary==2.9.9

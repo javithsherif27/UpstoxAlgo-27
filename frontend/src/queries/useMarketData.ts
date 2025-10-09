@@ -1,4 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useEffect } from 'react';
+import { uiStream, StreamEvent } from '../lib/ws';
 import { apiClient } from '../lib/api';
 import { 
   CandleDataDTO, 
@@ -12,7 +14,7 @@ export function useMarketDataCollectionStatus() {
   return useQuery({
     queryKey: ['market-data-collection-status'],
     queryFn: async (): Promise<MarketDataCollectionStatusDTO> => {
-      const response = await apiClient.get('/api/market-data/collection-status');
+      const response = await apiClient.get('/api/market-data/collection-status-noauth');
       return response.data;
     },
     refetchInterval: 2000, // Refresh every 2 seconds
@@ -24,7 +26,10 @@ export function useStartMarketDataCollection() {
   
   return useMutation({
     mutationFn: async (): Promise<{status: string, message: string}> => {
-      const response = await apiClient.post('/api/market-data/start');
+      // Send token in header and use noauth endpoint to simplify local runs
+      const tokenEntry = (await import('../lib/auth')).getUpstoxToken?.();
+      const headers = tokenEntry ? { 'X-Upstox-Access-Token': tokenEntry.token } : {};
+      const response = await apiClient.post('/api/market-data/start-noauth', null, { headers });
       return response.data;
     },
     onSuccess: () => {
@@ -39,7 +44,7 @@ export function useStopMarketDataCollection() {
   
   return useMutation({
     mutationFn: async (): Promise<{status: string, message: string}> => {
-      const response = await apiClient.post('/api/market-data/stop');
+      const response = await apiClient.post('/api/market-data/stop-noauth');
       return response.data;
     },
     onSuccess: () => {
@@ -123,6 +128,54 @@ export function useLivePrices() {
     },
     refetchInterval: 3000, // Refresh every 3 seconds
   });
+}
+
+// WebSocket-powered live LTP updates that merge into the react-query cache
+export function useLivePriceStream() {
+  const queryClient = useQueryClient();
+  useEffect(() => {
+    uiStream.connect();
+    const off = uiStream.on((evt: StreamEvent) => {
+      if (evt.type !== 'tick') return;
+      queryClient.setQueryData(['live-prices'], (prev: any) => {
+        const prevPrices = prev?.prices ?? {};
+        const existing = prevPrices[evt.instrument_key] ?? {
+          symbol: evt.symbol,
+          ltp: 0,
+          open: 0,
+          high: 0,
+          low: 0,
+          volume: 0,
+          change: 0,
+          change_percent: 0,
+          timestamp: evt.timestamp,
+        };
+
+        const ltp = evt.ltp ?? existing.ltp;
+        const open = existing.open ?? ltp;
+        const change = open ? (ltp - open) : 0;
+        const change_percent = open ? (change / open) * 100 : 0;
+
+        return {
+          ...(prev ?? {}),
+          prices: {
+            ...prevPrices,
+            [evt.instrument_key]: {
+              ...existing,
+              symbol: evt.symbol || existing.symbol,
+              ltp,
+              change,
+              change_percent,
+              source: 'websocket',
+              timestamp: evt.timestamp,
+            },
+          },
+          timestamp: new Date().toISOString(),
+        };
+      });
+    });
+    return () => { off(); };
+  }, [queryClient]);
 }
 
 // Fetch historical data for selected instruments

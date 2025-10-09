@@ -109,7 +109,14 @@ export const TradingDashboard: React.FC = () => {
     setIsLoading(true);
     try {
       // Replace with actual API call to search instruments
-      const response = await fetch(`/api/instruments/search?query=${query}`);
+      const backendUrl = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+      const response = await fetch(`${backendUrl}/api/instruments/search?query=${query}`, {
+        method: 'GET',
+        credentials: 'include', // Include cookies for authentication
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      });
       if (response.ok) {
         const results = await response.json();
         setSearchResults(results.slice(0, 10)); // Limit to 10 results

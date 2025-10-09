@@ -5,11 +5,12 @@ from collections import defaultdict
 from ..models.market_data_dto import (
     MarketTickDTO, CandleDataDTO, CandleInterval, SubscriptionRequest
 )
-from ..services.market_data_storage import market_data_storage
+from ..services.postgresql_market_data_storage import market_data_storage
 from ..services.websocket_client import upstox_ws_client
 from ..services.instrument_service import instrument_service
 from ..utils.logging import get_logger
 from ..services.backfill_client import fetch_intraday, fetch_historical
+from ..services.ws_broker import ws_broker
 
 logger = get_logger(__name__)
 
@@ -88,6 +89,23 @@ class CandleManager:
                     if self._should_close_candle(candle, tick.timestamp):
                         # Store the completed candle
                         await market_data_storage.store_candle(candle)
+                        # Broadcast closed candle snapshot
+                        try:
+                            await ws_broker.broadcast({
+                                "type": "candle",
+                                "event": "closed",
+                                "instrument_key": instrument_key,
+                                "symbol": candle.symbol,
+                                "interval": candle.interval.value,
+                                "timestamp": candle.timestamp.isoformat(),
+                                "open": candle.open_price,
+                                "high": candle.high_price,
+                                "low": candle.low_price,
+                                "close": candle.close_price,
+                                "volume": candle.volume,
+                            })
+                        except Exception:
+                            pass
                         logger.info(f"Closed {interval.value} candle for {tick.symbol}: O={candle.open_price} H={candle.high_price} L={candle.low_price} C={candle.close_price} V={candle.volume}")
                         
                         # Start new candle
@@ -118,6 +136,24 @@ class CandleManager:
                         # Periodically save active candles (every 10 ticks)
                         if candle.tick_count % 10 == 0:
                             await market_data_storage.store_candle(candle)
+                            # Broadcast partial forming candle snapshot
+                            try:
+                                await ws_broker.broadcast({
+                                    "type": "candle",
+                                    "event": "update",
+                                    "instrument_key": instrument_key,
+                                    "symbol": candle.symbol,
+                                    "interval": candle.interval.value,
+                                    "timestamp": candle.timestamp.isoformat(),
+                                    "open": candle.open_price,
+                                    "high": candle.high_price,
+                                    "low": candle.low_price,
+                                    "close": candle.close_price,
+                                    "volume": candle.volume,
+                                    "tick_count": candle.tick_count,
+                                })
+                            except Exception:
+                                pass
                             
         except Exception as e:
             logger.error(f"Error processing tick for candles: {e}")
@@ -162,6 +198,20 @@ class MarketDataService:
             
             # Update candles
             await self.candle_manager.process_tick(tick)
+
+            # Broadcast the tick to UI clients
+            try:
+                await ws_broker.broadcast({
+                    "type": "tick",
+                    "instrument_key": tick.instrument_key,
+                    "symbol": tick.symbol,
+                    "ltp": tick.ltp,
+                    "ltq": tick.ltq,
+                    "ltt": tick.ltt,
+                    "timestamp": tick.timestamp.isoformat(),
+                })
+            except Exception as be:
+                logger.debug(f"Broadcast tick failed: {be}")
             
             logger.debug(f"Processed tick for {tick.symbol}: LTP={tick.ltp}")
             

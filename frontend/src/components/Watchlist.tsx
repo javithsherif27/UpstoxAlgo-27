@@ -1,5 +1,5 @@
 import React from 'react';
-import { useLivePrices } from '../queries/useMarketData';
+import { useLivePrices, useLivePriceStream } from '../queries/useMarketData';
 
 interface Instrument {
   instrumentKey: string;
@@ -20,6 +20,8 @@ export const Watchlist: React.FC<WatchlistProps> = ({
   onSelectInstrument,
   onRemoveInstrument,
 }) => {
+  // Start live price stream merging into cache
+  useLivePriceStream();
   const { data: livePrices, isLoading } = useLivePrices();
 
   const formatPrice = (price: number) => {

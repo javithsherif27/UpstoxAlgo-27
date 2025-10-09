@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { TradingViewChart } from './TradingViewChart';
+import { StreamingStatus } from './StreamingStatus';
 import { useLivePrices } from '../queries/useMarketData';
 
 interface Instrument {
@@ -69,6 +70,7 @@ export const TradingChart: React.FC<TradingChartProps> = ({ instrument }) => {
                 </button>
               ))}
             </div>
+            <div className="ml-3"><StreamingStatus /></div>
           </div>
         </div>
 

@@ -6,10 +6,12 @@ import {
   useLivePrices,
   useCandlesForSelectedInstruments
 } from '../queries/useMarketData';
+import { useLivePriceStream } from '../queries/useMarketData';
 import { TVChart } from './TVChart';
 
 export const MarketDataDashboard: React.FC = () => {
   const [selectedInterval, setSelectedInterval] = useState('1m');
+  useLivePriceStream();
   
   const { data: collectionStatus, isLoading: statusLoading } = useMarketDataCollectionStatus();
   const { data: livePrices, isLoading: pricesLoading } = useLivePrices();

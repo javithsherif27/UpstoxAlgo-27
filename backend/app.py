@@ -1,4 +1,5 @@
-from fastapi import FastAPI, Request, Response
+from fastapi import FastAPI, Request, Response, WebSocket, WebSocketDisconnect
+import asyncio
 from fastapi.middleware.cors import CORSMiddleware
 from mangum import Mangum
 from .routers import session, upstox, instruments, market_data
@@ -22,6 +23,28 @@ configure_logging()
 logger = get_logger(__name__)
 
 app = FastAPI(title="Algo Trading App API")
+
+# Database startup and shutdown handlers
+@app.on_event("startup")
+async def startup_event():
+    """Initialize database on startup"""
+    try:
+        from .lib.database import init_database
+        await init_database()
+        logger.info("Database initialized successfully")
+    except Exception as e:
+        logger.error(f"Failed to initialize database: {e}")
+        raise
+
+@app.on_event("shutdown") 
+async def shutdown_event():
+    """Clean up database connections on shutdown"""
+    try:
+        from .lib.database import close_database
+        await close_database()
+        logger.info("Database connections closed")
+    except Exception as e:
+        logger.error(f"Error closing database connections: {e}")
 
 # More permissive CORS for development
 ALLOWED_ORIGINS = [
@@ -64,8 +87,32 @@ app.include_router(market_data.router, prefix="/api", tags=["market-data"])
 app.include_router(stream_market.router, tags=["stream"])
 app.include_router(portfolio_router.router, tags=["portfolio"])
 
+# Orders management
+from .routers import orders
+app.include_router(orders.router)
+
 # Trading-grade data management
 from .routers import trading_data
 app.include_router(trading_data.router, tags=["trading"])
 
 handler = Mangum(app)
+
+# Real-time WebSocket endpoint for UI
+from .services.ws_broker import ws_broker
+
+@app.websocket("/ws/stream")
+async def ws_stream(websocket: WebSocket):
+    await websocket.accept()
+    await ws_broker.add(websocket)
+    try:
+        # Basic echo/ping loop; break cleanly on disconnect
+        while True:
+            msg = await websocket.receive_text()
+            if msg == "ping":
+                await websocket.send_text("pong")
+    except WebSocketDisconnect:
+        pass
+    except Exception:
+        pass
+    finally:
+        await ws_broker.remove(websocket)
