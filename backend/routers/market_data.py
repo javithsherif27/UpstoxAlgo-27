@@ -12,6 +12,43 @@ from ..utils.logging import get_logger
 logger = get_logger(__name__)
 router = APIRouter()
 
+# Debug endpoint for chart testing
+@router.get("/market-data/debug-candles/{symbol}")
+async def debug_candles(symbol: str):
+    """Debug endpoint that returns fake candle data for testing chart component"""
+    import random
+    from datetime import datetime, timedelta
+    
+    # Generate fake candle data for testing
+    candles = []
+    base_price = 100.0
+    current_time = datetime.now()
+    
+    for i in range(50):  # 50 candles
+        # Random walk for price
+        change = random.uniform(-2, 2)
+        base_price += change
+        
+        # Ensure valid OHLC
+        open_price = base_price
+        close_price = base_price + random.uniform(-1, 1)
+        high_price = max(open_price, close_price) + random.uniform(0, 0.5)
+        low_price = min(open_price, close_price) - random.uniform(0, 0.5)
+        volume = random.randint(10000, 100000)
+        
+        candle_time = current_time - timedelta(days=50-i)
+        
+        candles.append({
+            "timestamp": candle_time.isoformat(),
+            "open_price": round(open_price, 2),
+            "high_price": round(high_price, 2),
+            "low_price": round(low_price, 2),
+            "close_price": round(close_price, 2),
+            "volume": volume
+        })
+    
+    return candles
+
 # Removed test endpoint - using only real data from database
 
 async def require_auth(request: Request):

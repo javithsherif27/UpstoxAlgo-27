@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { SimpleChart } from './SimpleChart';
+import { TradingViewChart } from './TradingViewChart';
 import { useLivePrices } from '../queries/useMarketData';
 
 interface Instrument {
@@ -124,16 +124,29 @@ export const TradingChart: React.FC<TradingChartProps> = ({ instrument }) => {
 
       {/* Chart Area */}
       <div className="flex-1 p-4 bg-gray-50">
-        {/* Debug Info */}
-        <div className="mb-2 text-xs text-gray-500 bg-white px-2 py-1 rounded border inline-block">
-          Current Interval: <span className="font-mono font-semibold text-blue-600">{selectedInterval}</span>
+        {/* Chart Upgrade Notice */}
+        <div className="mb-3 bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-200 rounded-lg p-3">
+          <div className="flex items-center space-x-2">
+            <span className="text-2xl">📊</span>
+            <div>
+              <div className="text-sm font-semibold text-blue-900">
+                Professional TradingView-Style Charts Enabled
+              </div>
+              <div className="text-xs text-blue-700">
+                Interactive candlestick charts with volume • Powered by Lightweight Charts
+              </div>
+            </div>
+            <div className="ml-auto bg-blue-100 text-blue-800 text-xs px-2 py-1 rounded-full font-medium">
+              {selectedInterval.toUpperCase()}
+            </div>
+          </div>
         </div>
         
-        <div className="h-full w-full bg-white rounded-lg shadow-sm border">
-          <SimpleChart 
+        <div className="h-full w-full">
+          <TradingViewChart 
             instrument={instrument}
             interval={selectedInterval}
-            height={window.innerHeight - 240} // Adjust height for new header and debug info
+            height={window.innerHeight - 300} // Adjusted height for upgrade notice
           />
         </div>
       </div>

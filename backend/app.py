@@ -26,8 +26,8 @@ app = FastAPI(title="Algo Trading App API")
 # More permissive CORS for development
 ALLOWED_ORIGINS = [
     "http://localhost:5173",
-    "http://localhost:5174",
-    "http://127.0.0.1:5173", 
+    "http://localhost:5174", 
+    "http://127.0.0.1:5173",
     "http://127.0.0.1:5174",
     "http://localhost:3000",
     "http://127.0.0.1:3000"
@@ -37,9 +37,10 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=ALLOWED_ORIGINS,
     allow_credentials=True,
-    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
     allow_headers=["*"],
     expose_headers=["*"],
+    max_age=3600,  # Cache preflight requests for 1 hour
 )
 
 # @app.middleware("http")
@@ -62,5 +63,9 @@ app.include_router(instruments.router, prefix="/api", tags=["instruments"])
 app.include_router(market_data.router, prefix="/api", tags=["market-data"])
 app.include_router(stream_market.router, tags=["stream"])
 app.include_router(portfolio_router.router, tags=["portfolio"])
+
+# Trading-grade data management
+from .routers import trading_data
+app.include_router(trading_data.router, tags=["trading"])
 
 handler = Mangum(app)
